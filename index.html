@@ -147,6 +147,7 @@
 				const context = originalGetContext(contextType, attributes);
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
 					patchWebGLContext(context);
+					patchShaderMethods(context); // Also patch shader methods on ALL contexts
 				}
 				return context;
 			};
@@ -212,6 +213,17 @@
 				return originalShaderSource(shader, source);
 			};
 
+			// Patch createShader to log failures
+			const originalCreateShader = gl.createShader.bind(gl);
+			gl.createShader = function(type) {
+				const shader = originalCreateShader(type);
+				if (!shader) {
+					console.error('[WebGL Fix] createShader returned null - context may be lost');
+					console.error('[WebGL Fix] GL Error:', gl.getError());
+				}
+				return shader;
+			};
+
 			// Patch getError to log errors
 			const originalGetError = gl.getError.bind(gl);
 			gl.getError = function() {
@@ -234,6 +246,16 @@
 				return error;
 			};
 		}
+
+		// Global error handlers
+		window.addEventListener('error', function(event) {
+			console.error('[WebGL Fix] Uncaught error:', event.error || event.message);
+			if (event.error && event.error.stack) console.error('[WebGL Fix] Stack:', event.error.stack);
+		});
+		window.addEventListener('unhandledrejection', function(event) {
+			console.error('[WebGL Fix] Unhandled rejection:', event.reason);
+			if (event.reason && event.reason.stack) console.error('[WebGL Fix] Stack:', event.reason.stack);
+		});
 
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
 		var engine = new Engine(GODOT_CONFIG);
