@@ -140,92 +140,42 @@
 	<script type='text/javascript'>//<![CDATA[
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
-		// Creates a stable WebGL context with proper attributes and patches getContextAttributes
-		function createStableWebGLContext(canvas) {
-			// Optimal attributes for iOS Safari compatibility
-			const contextAttributes = {
-				alpha: true,
-				antialias: true,
-				depth: true,
-				stencil: false,
-				premultipliedAlpha: true,
-				preserveDrawingBuffer: false,
-				powerPreference: 'high-performance',
-				failIfMajorPerformanceCaveat: false,
-			};
-
-			// Try WebGL2 first, fall back to WebGL1
-			let gl = canvas.getContext('webgl2', contextAttributes);
-			if (!gl) {
-				gl = canvas.getContext('webgl', contextAttributes);
-			}
-
-			// Fallback with minimal attributes if needed
-			if (!gl) {
-				const minimalAttributes = {
-					alpha: true,
-					antialias: false,
-					depth: true,
-					stencil: false,
-					premultipliedAlpha: true,
-					preserveDrawingBuffer: false,
-					failIfMajorPerformanceCaveat: false,
-				};
-				gl = canvas.getContext('webgl2', minimalAttributes) || canvas.getContext('webgl', minimalAttributes);
-			}
-
-			if (!gl) {
-				return null;
-			}
-
-			// CRITICAL: Patch getContextAttributes to NEVER return null (fixes iOS Safari bug)
-			const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
-			gl.getContextAttributes = function() {
-				const attrs = originalGetContextAttributes();
-				if (attrs === null) {
-					// Return valid attributes object instead of null
-					return {
-						alpha: true,
-						antialias: true,
-						depth: true,
-						stencil: false,
-						premultipliedAlpha: true,
-						preserveDrawingBuffer: false,
-					};
+		// Patch canvas.getContext to ensure ANY context created has safe getContextAttributes
+		function patchCanvasGetContext(canvas) {
+			const originalGetContext = canvas.getContext.bind(canvas);
+			canvas.getContext = function(contextType, attributes) {
+				const context = originalGetContext(contextType, attributes);
+				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
+					// Patch getContextAttributes to NEVER return null (fixes iOS Safari bug)
+					if (!context._patchedGetContextAttributes) {
+						const originalGetContextAttributes = context.getContextAttributes.bind(context);
+						context.getContextAttributes = function() {
+							const attrs = originalGetContextAttributes();
+							if (attrs === null) {
+								return {
+									alpha: true,
+									antialias: true,
+									depth: true,
+									stencil: false,
+									premultipliedAlpha: true,
+									preserveDrawingBuffer: false,
+								};
+							}
+							return attrs;
+						};
+						context._patchedGetContextAttributes = true;
+					}
 				}
-				return attrs;
+				return context;
 			};
-
-			// Ensure canvas has valid dimensions
-			if (canvas.width === 0) canvas.width = canvas.clientWidth || 320;
-			if (canvas.height === 0) canvas.height = canvas.clientHeight || 240;
-
-			return gl;
 		}
 
-		// Handle WebGL context loss on iOS Safari - prevent default and log
+		// Handle WebGL context loss on iOS Safari
 		function setupContextLossHandling(canvas) {
 			canvas.addEventListener('webglcontextlost', function(event) {
 				event.preventDefault(); // Allow context restoration
 			}, false);
-
-			canvas.addEventListener('webglcontextrestored', function(event) {
-				// Context will be re-initialized by Godot
-			}, false);
 		}
-
-		// Create the stable context BEFORE Godot initializes
-		// This ensures Godot reuses our context with patched getContextAttributes
-		const canvas = document.getElementById('canvas');
-		const stableGl = createStableWebGLContext(canvas);
-		if (!stableGl) {
-			console.error('Failed to create WebGL context');
-		} else {
-			setupContextLossHandling(canvas);
-		}
-
-		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
-		var engine = new Engine(GODOT_CONFIG);
 
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
 		var engine = new Engine(GODOT_CONFIG);
@@ -309,8 +259,8 @@
 				displayFailureNotice('WebGL not available');
 			} else {
 				const canvas = document.getElementById('canvas');
-				// Context already created and patched above (stableGl)
-				// Just ensure context loss handling is set up
+				// Patch canvas getContext so any WebGL context Godot creates has safe getContextAttributes
+				patchCanvasGetContext(canvas);
 				setupContextLossHandling(canvas);
 				setStatusMode('indeterminate');
 
