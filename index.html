@@ -140,60 +140,34 @@
 	<script type='text/javascript'>//<![CDATA[
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
-		// Create WebGL context explicitly with proper attributes before passing to Godot
-		function createWebGLContext(canvas) {
-			const contextAttributes = {
-				alpha: true,
-				antialias: true,
-				depth: true,
-				stencil: false,
-				premultipliedAlpha: true,
-				preserveDrawingBuffer: false,
-				powerPreference: 'default',
-				failIfMajorPerformanceCaveat: false,
-			};
-
-			// Try WebGL2 first, fall back to WebGL1
-			let gl = canvas.getContext('webgl2', contextAttributes);
-			if (!gl) {
-				gl = canvas.getContext('webgl', contextAttributes);
-			}
-
-			// If context creation failed, try with minimal attributes
-			if (!gl) {
-				const minimalAttributes = {
-					alpha: true,
-					antialias: false,
-					depth: true,
-					stencil: false,
-					premultipliedAlpha: true,
-					preserveDrawingBuffer: false,
-					failIfMajorPerformanceCaveat: false,
-				};
-				gl = canvas.getContext('webgl2', minimalAttributes) || canvas.getContext('webgl', minimalAttributes);
-			}
-
-			// Patch getContextAttributes to never return null (fixes iOS Safari bug)
-			if (gl) {
-				const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
-				gl.getContextAttributes = function() {
-					const attrs = originalGetContextAttributes();
-					if (attrs === null) {
-						// Return default attributes if browser returns null
-						return {
-							alpha: true,
-							antialias: true,
-							depth: true,
-							stencil: false,
-							premultipliedAlpha: true,
-							preserveDrawingBuffer: false,
+		// Patch getContext on the canvas to ensure any created context has a safe getContextAttributes
+		function patchCanvasContext(canvas) {
+			const originalGetContext = canvas.getContext.bind(canvas);
+			canvas.getContext = function(contextType, attributes) {
+				const context = originalGetContext(contextType, attributes);
+				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
+					// Patch getContextAttributes to never return null
+					if (!context._patchedGetContextAttributes) {
+						const originalGetContextAttributes = context.getContextAttributes.bind(context);
+						context.getContextAttributes = function() {
+							const attrs = originalGetContextAttributes();
+							if (attrs === null) {
+								return {
+									alpha: true,
+									antialias: true,
+									depth: true,
+									stencil: false,
+									premultipliedAlpha: true,
+									preserveDrawingBuffer: false,
+								};
+							}
+							return attrs;
 						};
+						context._patchedGetContextAttributes = true;
 					}
-					return attrs;
-				};
-			}
-
-			return gl;
+				}
+				return context;
+			};
 		}
 
 		// Handle WebGL context loss on iOS Safari
@@ -205,7 +179,6 @@
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
 				console.log('WebGL context restored');
-				// The Godot engine should handle reinitialization
 			}, false);
 		}
 
@@ -290,22 +263,18 @@
 			if (!Engine.isWebGLAvailable()) {
 				displayFailureNotice('WebGL not available');
 			} else {
-				// Pre-create WebGL context to avoid iOS Safari getContextAttributes() returning null
 				const canvas = document.getElementById('canvas');
-				const gl = createWebGLContext(canvas);
-				if (!gl) {
-					displayFailureNotice('Failed to create WebGL context');
-				} else {
-					setupContextLossHandling(canvas);
-					setStatusMode('indeterminate');
-					engine.startGame({
-						'canvas': canvas,
-						'onProgress': function (current, total) {
+				// Patch canvas getContext to auto-patch any WebGL context created on it
+				patchCanvasContext(canvas);
+				setupContextLossHandling(canvas);
+				setStatusMode('indeterminate');
+				engine.startGame({
+					'canvas': canvas,
+					'onProgress': function (current, total) {
 						if (total > 0) {
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
 							if (current === total) {
-								// wait for progress bar animation
 								setTimeout(() => {
 									setStatusMode('indeterminate');
 								}, 500);
@@ -317,7 +286,10 @@
 				}).then(() => {
 					setStatusMode('hidden');
 					initializing = false;
-				}, displayFailureNotice);
+				}, function(err) {
+					console.error('Engine startGame failed:', err);
+					displayFailureNotice(err);
+				});
 			}
 		})();
 	//]]></script>
