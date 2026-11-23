@@ -146,35 +146,93 @@
 			canvas.getContext = function(contextType, attributes) {
 				const context = originalGetContext(contextType, attributes);
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
-					// Patch getContextAttributes to NEVER return null (fixes iOS Safari bug)
-					if (!context._patchedGetContextAttributes) {
-						const originalGetContextAttributes = context.getContextAttributes.bind(context);
-						context.getContextAttributes = function() {
-							const attrs = originalGetContextAttributes();
-							if (attrs === null) {
-								return {
-									alpha: true,
-									antialias: true,
-									depth: true,
-									stencil: false,
-									premultipliedAlpha: true,
-									preserveDrawingBuffer: false,
-								};
-							}
-							return attrs;
-						};
-						context._patchedGetContextAttributes = true;
-					}
+					patchWebGLContext(context);
 				}
 				return context;
 			};
+		}
+
+		// Patch a WebGL context to have safe getContextAttributes
+		function patchWebGLContext(gl) {
+			if (gl._patchedGetContextAttributes) return;
+			const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
+			gl.getContextAttributes = function() {
+				const attrs = originalGetContextAttributes();
+				if (attrs === null) {
+					return {
+						alpha: true,
+						antialias: true,
+						depth: true,
+						stencil: false,
+						premultipliedAlpha: true,
+						preserveDrawingBuffer: false,
+					};
+				}
+				return attrs;
+			};
+			gl._patchedGetContextAttributes = true;
 		}
 
 		// Handle WebGL context loss on iOS Safari
 		function setupContextLossHandling(canvas) {
 			canvas.addEventListener('webglcontextlost', function(event) {
 				event.preventDefault(); // Allow context restoration
+				console.warn('[WebGL Fix] Context lost - will attempt restoration');
 			}, false);
+
+			canvas.addEventListener('webglcontextrestored', function(event) {
+				console.log('[WebGL Fix] Context restored - patching new context');
+				// Patch the newly restored context
+				setTimeout(() => {
+					const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+					if (gl) {
+						patchWebGLContext(gl);
+						patchShaderMethods(gl); // Also patch shader methods for validation
+						console.log('[WebGL Fix] Restored context patched');
+					}
+				}, 0);
+			}, false);
+		}
+
+		// Patch shader methods to validate shader objects and catch errors early
+		function patchShaderMethods(gl) {
+			if (gl._patchedShaderMethods) return;
+			gl._patchedShaderMethods = true;
+
+			// Patch shaderSource to validate shader object
+			const originalShaderSource = gl.shaderSource.bind(gl);
+			gl.shaderSource = function(shader, source) {
+				if (!shader || !(shader instanceof WebGLShader)) {
+					console.error('[WebGL Fix] INVALID SHADER passed to shaderSource:', shader);
+					console.error('[WebGL Fix] This indicates context was lost and shader objects are stale');
+					console.trace('[WebGL Fix] shaderSource call stack:');
+					// Don't call original - would throw
+					return;
+				}
+				return originalShaderSource(shader, source);
+			};
+
+			// Patch getError to log errors
+			const originalGetError = gl.getError.bind(gl);
+			gl.getError = function() {
+				const error = originalGetError();
+				if (error !== gl.NO_ERROR) {
+					const errorNames = {
+						0x0500: 'INVALID_ENUM',
+						0x0501: 'INVALID_VALUE',
+						0x0502: 'INVALID_OPERATION',
+						0x0503: 'STACK_OVERFLOW',
+						0x0504: 'STACK_UNDERFLOW',
+						0x0505: 'OUT_OF_MEMORY',
+						0x0506: 'INVALID_FRAMEBUFFER_OPERATION',
+						0x0507: 'CONTEXT_LOST_WEBGL'
+					};
+					if (error !== 0x0507) { // Don't spam CONTEXT_LOST
+						console.error('[WebGL Fix] GL Error:', errorNames[error] || error);
+					}
+				}
+				return error;
+			};
 		}
 
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
