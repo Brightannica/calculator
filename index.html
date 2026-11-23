@@ -144,14 +144,26 @@
 		function patchCanvasContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
 			canvas.getContext = function(contextType, attributes) {
+				console.log('[WebGL Fix] getContext called:', contextType, attributes);
 				const context = originalGetContext(contextType, attributes);
+				console.log('[WebGL Fix] getContext returned:', context ? 'context created' : 'null');
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
+					// Log initial context attributes
+					try {
+						const initialAttrs = context.getContextAttributes();
+						console.log('[WebGL Fix] Initial context attributes:', initialAttrs);
+					} catch (e) {
+						console.warn('[WebGL Fix] Error getting initial attributes:', e);
+					}
+
 					// Patch getContextAttributes to never return null
 					if (!context._patchedGetContextAttributes) {
 						const originalGetContextAttributes = context.getContextAttributes.bind(context);
 						context.getContextAttributes = function() {
 							const attrs = originalGetContextAttributes();
+							console.log('[WebGL Fix] getContextAttributes called, returned:', attrs);
 							if (attrs === null) {
+								console.warn('[WebGL Fix] getContextAttributes returned null! Returning safe defaults.');
 								return {
 									alpha: true,
 									antialias: true,
@@ -164,6 +176,18 @@
 							return attrs;
 						};
 						context._patchedGetContextAttributes = true;
+						console.log('[WebGL Fix] Patched getContextAttributes for context');
+					}
+
+					// Log WebGL version info
+					try {
+						const version = context.getParameter(context.VERSION);
+						const shadingLanguageVersion = context.getParameter(context.SHADING_LANGUAGE_VERSION);
+						const vendor = context.getParameter(context.VENDOR);
+						const renderer = context.getParameter(context.RENDERER);
+						console.log('[WebGL Fix] Context info:', { version, shadingLanguageVersion, vendor, renderer });
+					} catch (e) {
+						console.warn('[WebGL Fix] Could not get context parameters:', e);
 					}
 				}
 				return context;
@@ -174,13 +198,49 @@
 		function setupContextLossHandling(canvas) {
 			canvas.addEventListener('webglcontextlost', function(event) {
 				event.preventDefault();
-				console.warn('WebGL context lost, attempting to restore...');
+				console.error('[WebGL Fix] CONTEXT LOST!', new Error().stack);
 			}, false);
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
-				console.log('WebGL context restored');
+				console.log('[WebGL Fix] CONTEXT RESTORED');
+				// Try to log new context info
+				setTimeout(() => {
+					try {
+						const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+						if (gl) {
+							const attrs = gl.getContextAttributes();
+							console.log('[WebGL Fix] Restored context attributes:', attrs);
+						}
+					} catch (e) {
+						console.warn('[WebGL Fix] Error checking restored context:', e);
+					}
+				}, 0);
 			}, false);
 		}
+
+		// Global error handler for uncaught errors
+		window.addEventListener('error', function(event) {
+			console.error('[WebGL Fix] Uncaught error:', event.error || event.message);
+			if (event.error && event.error.stack) {
+				console.error('[WebGL Fix] Stack:', event.error.stack);
+			}
+		});
+
+		window.addEventListener('unhandledrejection', function(event) {
+			console.error('[WebGL Fix] Unhandled rejection:', event.reason);
+			if (event.reason && event.reason.stack) {
+				console.error('[WebGL Fix] Stack:', event.reason.stack);
+			}
+		});
+
+		// Patch Engine.isWebGLAvailable to use patched context check
+		const originalIsWebGLAvailable = Engine.isWebGLAvailable;
+		Engine.isWebGLAvailable = function(majorVersion) {
+			console.log('[WebGL Fix] Engine.isWebGLAvailable called with:', majorVersion);
+			const result = originalIsWebGLAvailable.call(this, majorVersion);
+			console.log('[WebGL Fix] Engine.isWebGLAvailable returned:', result);
+			return result;
+		};
 
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
 		var engine = new Engine(GODOT_CONFIG);
@@ -264,13 +324,20 @@
 				displayFailureNotice('WebGL not available');
 			} else {
 				const canvas = document.getElementById('canvas');
+				console.log('[WebGL Fix] Canvas found:', canvas);
+				console.log('[WebGL Fix] Canvas size:', canvas.width, 'x', canvas.height);
+				console.log('[WebGL Fix] Canvas client size:', canvas.clientWidth, 'x', canvas.clientHeight);
+
 				// Patch canvas getContext to auto-patch any WebGL context created on it
 				patchCanvasContext(canvas);
 				setupContextLossHandling(canvas);
 				setStatusMode('indeterminate');
+
+				console.log('[WebGL Fix] Calling engine.startGame...');
 				engine.startGame({
 					'canvas': canvas,
 					'onProgress': function (current, total) {
+						console.log('[WebGL Fix] Progress:', current, '/', total);
 						if (total > 0) {
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
@@ -284,10 +351,12 @@
 						}
 					},
 				}).then(() => {
+					console.log('[WebGL Fix] Engine started successfully!');
 					setStatusMode('hidden');
 					initializing = false;
 				}, function(err) {
-					console.error('Engine startGame failed:', err);
+					console.error('[WebGL Fix] Engine startGame failed:', err);
+					if (err && err.stack) console.error('[WebGL Fix] Stack:', err.stack);
 					displayFailureNotice(err);
 				});
 			}
