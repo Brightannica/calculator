@@ -140,192 +140,92 @@
 	<script type='text/javascript'>//<![CDATA[
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
-		// Patch getContext on the canvas to ensure any created context has a safe getContextAttributes
-		function patchCanvasContext(canvas) {
-			const originalGetContext = canvas.getContext.bind(canvas);
-			canvas.getContext = function(contextType, attributes) {
-				console.log('[WebGL Fix] getContext called:', contextType, attributes);
-				const context = originalGetContext(contextType, attributes);
-				console.log('[WebGL Fix] getContext returned:', context ? 'context created' : 'null');
-				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
-					// Log initial context attributes
-					try {
-						const initialAttrs = context.getContextAttributes();
-						console.log('[WebGL Fix] Initial context attributes:', initialAttrs);
-					} catch (e) {
-						console.warn('[WebGL Fix] Error getting initial attributes:', e);
-					}
-
-					// Patch getContextAttributes to never return null
-					if (!context._patchedGetContextAttributes) {
-						const originalGetContextAttributes = context.getContextAttributes.bind(context);
-						context.getContextAttributes = function() {
-							const attrs = originalGetContextAttributes();
-							console.log('[WebGL Fix] getContextAttributes called, returned:', attrs);
-							if (attrs === null) {
-								console.warn('[WebGL Fix] getContextAttributes returned null! Returning safe defaults.');
-								return {
-									alpha: true,
-									antialias: true,
-									depth: true,
-									stencil: false,
-									premultipliedAlpha: true,
-									preserveDrawingBuffer: false,
-								};
-							}
-							return attrs;
-						};
-						context._patchedGetContextAttributes = true;
-						console.log('[WebGL Fix] Patched getContextAttributes for context');
-					}
-
-					// Log WebGL version info
-					try {
-						const version = context.getParameter(context.VERSION);
-						const shadingLanguageVersion = context.getParameter(context.SHADING_LANGUAGE_VERSION);
-						const vendor = context.getParameter(context.VENDOR);
-						const renderer = context.getParameter(context.RENDERER);
-						console.log('[WebGL Fix] Context info:', { version, shadingLanguageVersion, vendor, renderer });
-					} catch (e) {
-						console.warn('[WebGL Fix] Could not get context parameters:', e);
-					}
-
-					// Patch shader creation methods for debugging
-					patchShaderMethods(context);
-				}
-				return context;
-			};
-		}
-
-		// Patch WebGL shader methods to debug shader creation issues
-		function patchShaderMethods(gl) {
-			// Patch createShader
-			const originalCreateShader = gl.createShader.bind(gl);
-			gl.createShader = function(type) {
-				const shader = originalCreateShader(type);
-				console.log('[WebGL Fix] createShader:', type === gl.VERTEX_SHADER ? 'VERTEX' : type === gl.FRAGMENT_SHADER ? 'FRAGMENT' : type, '->', shader);
-				if (!shader) {
-					console.error('[WebGL Fix] createShader returned null! Error:', gl.getError());
-				}
-				return shader;
+		// Creates a stable WebGL context with proper attributes and patches getContextAttributes
+		function createStableWebGLContext(canvas) {
+			// Optimal attributes for iOS Safari compatibility
+			const contextAttributes = {
+				alpha: true,
+				antialias: true,
+				depth: true,
+				stencil: false,
+				premultipliedAlpha: true,
+				preserveDrawingBuffer: false,
+				powerPreference: 'high-performance',
+				failIfMajorPerformanceCaveat: false,
 			};
 
-			// Patch shaderSource
-			const originalShaderSource = gl.shaderSource.bind(gl);
-			gl.shaderSource = function(shader, source) {
-				console.log('[WebGL Fix] shaderSource called, shader:', shader, 'source length:', source ? source.length : 0);
-				if (!shader || !(shader instanceof WebGLShader)) {
-					console.error('[WebGL Fix] INVALID SHADER passed to shaderSource:', shader);
-					console.trace('[WebGL Fix] shaderSource call stack:');
-				}
-				return originalShaderSource(shader, source);
-			};
+			// Try WebGL2 first, fall back to WebGL1
+			let gl = canvas.getContext('webgl2', contextAttributes);
+			if (!gl) {
+				gl = canvas.getContext('webgl', contextAttributes);
+			}
 
-			// Patch compileShader
-			const originalCompileShader = gl.compileShader.bind(gl);
-			gl.compileShader = function(shader) {
-				console.log('[WebGL Fix] compileShader called, shader:', shader);
-				originalCompileShader(shader);
-				const compiled = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
-				if (!compiled) {
-					const infoLog = gl.getShaderInfoLog(shader);
-					console.error('[WebGL Fix] Shader compilation failed:', infoLog);
-				} else {
-					console.log('[WebGL Fix] Shader compiled successfully');
-				}
-			};
+			// Fallback with minimal attributes if needed
+			if (!gl) {
+				const minimalAttributes = {
+					alpha: true,
+					antialias: false,
+					depth: true,
+					stencil: false,
+					premultipliedAlpha: true,
+					preserveDrawingBuffer: false,
+					failIfMajorPerformanceCaveat: false,
+				};
+				gl = canvas.getContext('webgl2', minimalAttributes) || canvas.getContext('webgl', minimalAttributes);
+			}
 
-			// Patch createProgram
-			const originalCreateProgram = gl.createProgram.bind(gl);
-			gl.createProgram = function() {
-				const program = originalCreateProgram();
-				console.log('[WebGL Fix] createProgram ->', program);
-				return program;
-			};
+			if (!gl) {
+				return null;
+			}
 
-			// Patch linkProgram
-			const originalLinkProgram = gl.linkProgram.bind(gl);
-			gl.linkProgram = function(program) {
-				console.log('[WebGL Fix] linkProgram called, program:', program);
-				originalLinkProgram(program);
-				const linked = gl.getProgramParameter(program, gl.LINK_STATUS);
-				if (!linked) {
-					const infoLog = gl.getProgramInfoLog(program);
-					console.error('[WebGL Fix] Program linking failed:', infoLog);
-				} else {
-					console.log('[WebGL Fix] Program linked successfully');
-				}
-			};
-
-			// Patch getError to log errors
-			const originalGetError = gl.getError.bind(gl);
-			gl.getError = function() {
-				const error = originalGetError();
-				if (error !== gl.NO_ERROR) {
-					const errorNames = {
-						0x0500: 'INVALID_ENUM',
-						0x0501: 'INVALID_VALUE',
-						0x0502: 'INVALID_OPERATION',
-						0x0503: 'STACK_OVERFLOW',
-						0x0504: 'STACK_UNDERFLOW',
-						0x0505: 'OUT_OF_MEMORY',
-						0x0506: 'INVALID_FRAMEBUFFER_OPERATION',
-						0x0507: 'CONTEXT_LOST_WEBGL'
+			// CRITICAL: Patch getContextAttributes to NEVER return null (fixes iOS Safari bug)
+			const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
+			gl.getContextAttributes = function() {
+				const attrs = originalGetContextAttributes();
+				if (attrs === null) {
+					// Return valid attributes object instead of null
+					return {
+						alpha: true,
+						antialias: true,
+						depth: true,
+						stencil: false,
+						premultipliedAlpha: true,
+						preserveDrawingBuffer: false,
 					};
-					console.error('[WebGL Fix] GL Error:', errorNames[error] || error);
-					console.trace('[WebGL Fix] GL Error stack:');
 				}
-				return error;
+				return attrs;
 			};
+
+			// Ensure canvas has valid dimensions
+			if (canvas.width === 0) canvas.width = canvas.clientWidth || 320;
+			if (canvas.height === 0) canvas.height = canvas.clientHeight || 240;
+
+			return gl;
 		}
 
-		// Handle WebGL context loss on iOS Safari
+		// Handle WebGL context loss on iOS Safari - prevent default and log
 		function setupContextLossHandling(canvas) {
 			canvas.addEventListener('webglcontextlost', function(event) {
-				event.preventDefault();
-				console.error('[WebGL Fix] CONTEXT LOST!', new Error().stack);
+				event.preventDefault(); // Allow context restoration
 			}, false);
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
-				console.log('[WebGL Fix] CONTEXT RESTORED');
-				// Try to log new context info
-				setTimeout(() => {
-					try {
-						const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-						if (gl) {
-							const attrs = gl.getContextAttributes();
-							console.log('[WebGL Fix] Restored context attributes:', attrs);
-						}
-					} catch (e) {
-						console.warn('[WebGL Fix] Error checking restored context:', e);
-					}
-				}, 0);
+				// Context will be re-initialized by Godot
 			}, false);
 		}
 
-		// Global error handler for uncaught errors
-		window.addEventListener('error', function(event) {
-			console.error('[WebGL Fix] Uncaught error:', event.error || event.message);
-			if (event.error && event.error.stack) {
-				console.error('[WebGL Fix] Stack:', event.error.stack);
-			}
-		});
+		// Create the stable context BEFORE Godot initializes
+		// This ensures Godot reuses our context with patched getContextAttributes
+		const canvas = document.getElementById('canvas');
+		const stableGl = createStableWebGLContext(canvas);
+		if (!stableGl) {
+			console.error('Failed to create WebGL context');
+		} else {
+			setupContextLossHandling(canvas);
+		}
 
-		window.addEventListener('unhandledrejection', function(event) {
-			console.error('[WebGL Fix] Unhandled rejection:', event.reason);
-			if (event.reason && event.reason.stack) {
-				console.error('[WebGL Fix] Stack:', event.reason.stack);
-			}
-		});
-
-		// Patch Engine.isWebGLAvailable to use patched context check
-		const originalIsWebGLAvailable = Engine.isWebGLAvailable;
-		Engine.isWebGLAvailable = function(majorVersion) {
-			console.log('[WebGL Fix] Engine.isWebGLAvailable called with:', majorVersion);
-			const result = originalIsWebGLAvailable.call(this, majorVersion);
-			console.log('[WebGL Fix] Engine.isWebGLAvailable returned:', result);
-			return result;
-		};
+		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
+		var engine = new Engine(GODOT_CONFIG);
 
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
 		var engine = new Engine(GODOT_CONFIG);
@@ -409,20 +309,14 @@
 				displayFailureNotice('WebGL not available');
 			} else {
 				const canvas = document.getElementById('canvas');
-				console.log('[WebGL Fix] Canvas found:', canvas);
-				console.log('[WebGL Fix] Canvas size:', canvas.width, 'x', canvas.height);
-				console.log('[WebGL Fix] Canvas client size:', canvas.clientWidth, 'x', canvas.clientHeight);
-
-				// Patch canvas getContext to auto-patch any WebGL context created on it
-				patchCanvasContext(canvas);
+				// Context already created and patched above (stableGl)
+				// Just ensure context loss handling is set up
 				setupContextLossHandling(canvas);
 				setStatusMode('indeterminate');
 
-				console.log('[WebGL Fix] Calling engine.startGame...');
 				engine.startGame({
 					'canvas': canvas,
 					'onProgress': function (current, total) {
-						console.log('[WebGL Fix] Progress:', current, '/', total);
 						if (total > 0) {
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
@@ -436,12 +330,10 @@
 						}
 					},
 				}).then(() => {
-					console.log('[WebGL Fix] Engine started successfully!');
 					setStatusMode('hidden');
 					initializing = false;
 				}, function(err) {
-					console.error('[WebGL Fix] Engine startGame failed:', err);
-					if (err && err.stack) console.error('[WebGL Fix] Stack:', err.stack);
+					console.error('Engine startGame failed:', err);
 					displayFailureNotice(err);
 				});
 			}
