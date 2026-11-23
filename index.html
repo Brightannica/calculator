@@ -139,6 +139,76 @@
 	<script type='text/javascript' src='index.js'></script>
 	<script type='text/javascript'>//<![CDATA[
 
+		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
+		// Create WebGL context explicitly with proper attributes before passing to Godot
+		function createWebGLContext(canvas) {
+			const contextAttributes = {
+				alpha: true,
+				antialias: true,
+				depth: true,
+				stencil: false,
+				premultipliedAlpha: true,
+				preserveDrawingBuffer: false,
+				powerPreference: 'default',
+				failIfMajorPerformanceCaveat: false,
+			};
+
+			// Try WebGL2 first, fall back to WebGL1
+			let gl = canvas.getContext('webgl2', contextAttributes);
+			if (!gl) {
+				gl = canvas.getContext('webgl', contextAttributes);
+			}
+
+			// If context creation failed, try with minimal attributes
+			if (!gl) {
+				const minimalAttributes = {
+					alpha: true,
+					antialias: false,
+					depth: true,
+					stencil: false,
+					premultipliedAlpha: true,
+					preserveDrawingBuffer: false,
+					failIfMajorPerformanceCaveat: false,
+				};
+				gl = canvas.getContext('webgl2', minimalAttributes) || canvas.getContext('webgl', minimalAttributes);
+			}
+
+			// Patch getContextAttributes to never return null (fixes iOS Safari bug)
+			if (gl) {
+				const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
+				gl.getContextAttributes = function() {
+					const attrs = originalGetContextAttributes();
+					if (attrs === null) {
+						// Return default attributes if browser returns null
+						return {
+							alpha: true,
+							antialias: true,
+							depth: true,
+							stencil: false,
+							premultipliedAlpha: true,
+							preserveDrawingBuffer: false,
+						};
+					}
+					return attrs;
+				};
+			}
+
+			return gl;
+		}
+
+		// Handle WebGL context loss on iOS Safari
+		function setupContextLossHandling(canvas) {
+			canvas.addEventListener('webglcontextlost', function(event) {
+				event.preventDefault();
+				console.warn('WebGL context lost, attempting to restore...');
+			}, false);
+
+			canvas.addEventListener('webglcontextrestored', function(event) {
+				console.log('WebGL context restored');
+				// The Godot engine should handle reinitialization
+			}, false);
+		}
+
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
 		var engine = new Engine(GODOT_CONFIG);
 
@@ -220,9 +290,17 @@
 			if (!Engine.isWebGLAvailable()) {
 				displayFailureNotice('WebGL not available');
 			} else {
-				setStatusMode('indeterminate');
-				engine.startGame({
-					'onProgress': function (current, total) {
+				// Pre-create WebGL context to avoid iOS Safari getContextAttributes() returning null
+				const canvas = document.getElementById('canvas');
+				const gl = createWebGLContext(canvas);
+				if (!gl) {
+					displayFailureNotice('Failed to create WebGL context');
+				} else {
+					setupContextLossHandling(canvas);
+					setStatusMode('indeterminate');
+					engine.startGame({
+						'canvas': canvas,
+						'onProgress': function (current, total) {
 						if (total > 0) {
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
