@@ -189,8 +189,93 @@
 					} catch (e) {
 						console.warn('[WebGL Fix] Could not get context parameters:', e);
 					}
+
+					// Patch shader creation methods for debugging
+					patchShaderMethods(context);
 				}
 				return context;
+			};
+		}
+
+		// Patch WebGL shader methods to debug shader creation issues
+		function patchShaderMethods(gl) {
+			// Patch createShader
+			const originalCreateShader = gl.createShader.bind(gl);
+			gl.createShader = function(type) {
+				const shader = originalCreateShader(type);
+				console.log('[WebGL Fix] createShader:', type === gl.VERTEX_SHADER ? 'VERTEX' : type === gl.FRAGMENT_SHADER ? 'FRAGMENT' : type, '->', shader);
+				if (!shader) {
+					console.error('[WebGL Fix] createShader returned null! Error:', gl.getError());
+				}
+				return shader;
+			};
+
+			// Patch shaderSource
+			const originalShaderSource = gl.shaderSource.bind(gl);
+			gl.shaderSource = function(shader, source) {
+				console.log('[WebGL Fix] shaderSource called, shader:', shader, 'source length:', source ? source.length : 0);
+				if (!shader || !(shader instanceof WebGLShader)) {
+					console.error('[WebGL Fix] INVALID SHADER passed to shaderSource:', shader);
+					console.trace('[WebGL Fix] shaderSource call stack:');
+				}
+				return originalShaderSource(shader, source);
+			};
+
+			// Patch compileShader
+			const originalCompileShader = gl.compileShader.bind(gl);
+			gl.compileShader = function(shader) {
+				console.log('[WebGL Fix] compileShader called, shader:', shader);
+				originalCompileShader(shader);
+				const compiled = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+				if (!compiled) {
+					const infoLog = gl.getShaderInfoLog(shader);
+					console.error('[WebGL Fix] Shader compilation failed:', infoLog);
+				} else {
+					console.log('[WebGL Fix] Shader compiled successfully');
+				}
+			};
+
+			// Patch createProgram
+			const originalCreateProgram = gl.createProgram.bind(gl);
+			gl.createProgram = function() {
+				const program = originalCreateProgram();
+				console.log('[WebGL Fix] createProgram ->', program);
+				return program;
+			};
+
+			// Patch linkProgram
+			const originalLinkProgram = gl.linkProgram.bind(gl);
+			gl.linkProgram = function(program) {
+				console.log('[WebGL Fix] linkProgram called, program:', program);
+				originalLinkProgram(program);
+				const linked = gl.getProgramParameter(program, gl.LINK_STATUS);
+				if (!linked) {
+					const infoLog = gl.getProgramInfoLog(program);
+					console.error('[WebGL Fix] Program linking failed:', infoLog);
+				} else {
+					console.log('[WebGL Fix] Program linked successfully');
+				}
+			};
+
+			// Patch getError to log errors
+			const originalGetError = gl.getError.bind(gl);
+			gl.getError = function() {
+				const error = originalGetError();
+				if (error !== gl.NO_ERROR) {
+					const errorNames = {
+						0x0500: 'INVALID_ENUM',
+						0x0501: 'INVALID_VALUE',
+						0x0502: 'INVALID_OPERATION',
+						0x0503: 'STACK_OVERFLOW',
+						0x0504: 'STACK_UNDERFLOW',
+						0x0505: 'OUT_OF_MEMORY',
+						0x0506: 'INVALID_FRAMEBUFFER_OPERATION',
+						0x0507: 'CONTEXT_LOST_WEBGL'
+					};
+					console.error('[WebGL Fix] GL Error:', errorNames[error] || error);
+					console.trace('[WebGL Fix] GL Error stack:');
+				}
+				return error;
 			};
 		}
 
