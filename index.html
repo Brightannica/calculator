@@ -234,7 +234,7 @@
 			};
 
 			// Patch program methods too (they can also receive stale objects)
-			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram'];
+			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform'];
 			programMethods.forEach(method => {
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
