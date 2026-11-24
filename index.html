@@ -213,7 +213,7 @@
 			if (gl._patchedShaderMethods) return;
 			gl._patchedShaderMethods = true;
 
-			const shaderMethods = ['shaderSource', 'compileShader', 'getShaderParameter', 'getShaderInfoLog', 'deleteShader'];
+			const shaderMethods = ['shaderSource', 'compileShader', 'getShaderParameter', 'getShaderInfoLog', 'deleteShader', 'getShaderSource'];
 			shaderMethods.forEach(method => {
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
