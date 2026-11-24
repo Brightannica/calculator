@@ -337,7 +337,6 @@
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
-		// Force WebGL 1 for iOS Safari stability
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
 			// iOS Safari compatible WebGL attributes
@@ -352,10 +351,6 @@
 				failIfMajorPerformanceCaveat: false,
 			};
 			canvas.getContext = function(contextType, attributes) {
-				// Force WebGL 1 on iOS Safari for stability
-				if (contextType === 'webgl2' && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
-					contextType = 'webgl';
-				}
 				// Use our stable attributes
 				const mergedAttrs = Object.assign({}, {
 					alpha: true,
@@ -397,18 +392,49 @@
 			gl._patchedGetContextAttributes = true;
 		}
 
-		// Handle WebGL context loss on iOS Safari
+		// Handle WebGL context loss on iOS Safari - AGGRESSIVE recovery
 		function setupContextLossHandling(canvas) {
 			let contextLost = false;
+			let restorationAttempts = 0;
+			const MAX_RESTORATION_ATTEMPTS = 5;
+
 			canvas.addEventListener('webglcontextlost', function(event) {
 				event.preventDefault();
 				contextLost = true;
-				console.log('[WebGL Fix] Context lost - will attempt restoration');
+				console.error('[WebGL Fix] CONTEXT LOST! Attempt:', restorationAttempts + 1);
+				
+				// Try to create a new context immediately
+				setTimeout(function attemptRestore() {
+					if (restorationAttempts >= MAX_RESTORATION_ATTEMPTS) {
+						console.error('[WebGL Fix] Max restoration attempts reached');
+						return;
+					}
+					restorationAttempts++;
+					
+					const gl = canvas.getContext('webgl', {
+						alpha: true,
+						antialias: true,
+						depth: true,
+						stencil: false,
+						premultipliedAlpha: true,
+						preserveDrawingBuffer: true,
+						powerPreference: 'default',
+						failIfMajorPerformanceCaveat: false,
+					});
+					
+					if (gl) {
+						patchWebGLContext(gl);
+						patchShaderMethods(gl);
+						contextLost = false;
+						console.log('[WebGL Fix] Context restored successfully on attempt', restorationAttempts);
+					} else if (restorationAttempts < MAX_RESTORATION_ATTEMPTS) {
+						setTimeout(attemptRestore, 1000);
+					}
+				}, 100);
 			}, false);
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
-				console.log('[WebGL Fix] Context restored - reinitializing');
-				contextLost = false;
+				console.log('[WebGL Fix] Native context restored event');
 				setTimeout(() => {
 					const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
 					if (gl) {
@@ -429,40 +455,27 @@
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
 					gl[method] = function(shader, ...args) {
+						// Check context lost FIRST
 						if (gl.isContextLost && gl.isContextLost()) {
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
+						// Accept dummy shaders
 						if (!shader || !(shader instanceof WebGLShader || (shader && shader.__webglFixDummy))) {
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
-						return original(shader, ...args);
+						try {
+							return original(shader, ...args);
+						} catch (e) {
+							if (e.message && e.message.includes('WebGLShader')) {
+								return method === 'getShaderInfoLog' ? '' : undefined;
+							}
+							throw e;
+						}
 					};
 				}
 			});
 
-			// Create a fully functional dummy shader
-			function createDummyShader() {
-				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
-				return new Proxy(dummy, {
-					get(target, prop) {
-						if (prop in target) return target[prop];
-						return function() {};
-					},
-					set(target, prop, value) { target[prop] = value; return true; }
-				});
-			}
-
-			// Patch createShader to NEVER return null
-			const originalCreateShader = gl.createShader.bind(gl);
-			gl.createShader = function(type) {
-				const shader = originalCreateShader(type);
-				if (!shader) {
-					return createDummyShader();
-				}
-				return shader;
-			};
-
-			// Patch program methods too (they can also receive stale objects)
+			// Also patch program methods
 			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform', 'bindAttribLocation', 'getProgramInfoLog'];
 			programMethods.forEach(method => {
 				if (typeof gl[method] === 'function') {
@@ -488,6 +501,28 @@
 					};
 				}
 			});
+
+			// Create a fully functional dummy shader
+			function createDummyShader() {
+				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
+				return new Proxy(dummy, {
+					get(target, prop) {
+						if (prop in target) return target[prop];
+						return function() {};
+					},
+					set(target, prop, value) { target[prop] = value; return true; }
+				});
+			}
+
+			// Patch createShader to NEVER return null
+			const originalCreateShader = gl.createShader.bind(gl);
+			gl.createShader = function(type) {
+				const shader = originalCreateShader(type);
+				if (!shader) {
+					return createDummyShader();
+				}
+				return shader;
+			};
 
 			// Create a fully functional dummy program that accepts any property/method
 			function createDummyProgram() {
