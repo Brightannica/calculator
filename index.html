@@ -149,23 +149,25 @@
 			right: 8px;
 			z-index: 2147483647;
 			display: flex;
-			gap: 4px;
+			gap: 8px;
 			pointer-events: auto;
 		}
 		#debug-controls button {
-			background: #111;
+			background: #000;
 			color: #0f0;
-			border: 2px solid #0f0;
-			padding: 10px 14px;
-			border-radius: 4px;
-			font-size: 13px;
+			border: 3px solid #0f0;
+			padding: 14px 18px;
+			border-radius: 6px;
+			font-size: 15px;
 			font-weight: bold;
 			cursor: pointer;
 			-webkit-tap-highlight-color: transparent;
 			touch-action: manipulation;
 			font-family: monospace;
-			box-shadow: 0 2px 8px #000;
+			box-shadow: 0 4px 12px #000;
 			pointer-events: auto;
+			min-width: 80px;
+			min-height: 50px;
 		}
 		#debug-controls button:active { background: #0f0; color: #000; }
 	</style>
@@ -254,6 +256,7 @@
 				logPanel.style.display = visible ? 'block' : 'none';
 				toggleBtn.textContent = visible ? 'HIDE' : 'SHOW';
 				console.log('[Debug] Toggle clicked, visible:', visible);
+				addLog('info', ['Toggle clicked, visible:', visible]);
 			};
 
 			// Ensure click works on iOS - use both click and touchend
@@ -261,9 +264,32 @@
 				e.preventDefault();
 				e.stopPropagation();
 				window.toggleDebugLog();
+				return false;
 			}
-			toggleBtn.addEventListener('click', handleToggle, { passive: false });
-			toggleBtn.addEventListener('touchend', handleToggle, { passive: false });
+			// Add listeners after a short delay to ensure DOM is ready
+			setTimeout(function() {
+				toggleBtn.addEventListener('click', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.toggleDebugLog();
+				}, { passive: false });
+				toggleBtn.addEventListener('touchend', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.toggleDebugLog();
+				}, { passive: false });
+				// Also add for copy button
+				copyBtn.addEventListener('click', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.copyDebugLogs();
+				}, { passive: false });
+				copyBtn.addEventListener('touchend', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.copyDebugLogs();
+				}, { passive: false });
+			}, 100);
 
 			window.copyDebugLogs = function() {
 				var text = logs.map(function(l) { return l.time + ' [' + l.level.toUpperCase() + '] ' + l.msg; }).join('\n');
