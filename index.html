@@ -133,6 +133,7 @@
 			white-space: pre-wrap;
 			word-break: break-all;
 			box-shadow: 0 -2px 8px #000;
+			pointer-events: auto;
 		}
 		#debug-log-panel .log-entry {
 			margin: 0;
@@ -148,19 +149,25 @@
 			right: 8px;
 			z-index: 2147483647;
 			display: flex;
-			gap: 4px;
+			gap: 8px;
+			pointer-events: auto;
 		}
 		#debug-controls button {
-			background: #111;
+			background: #000;
 			color: #0f0;
-			border: 1px solid #0f0;
-			padding: 8px 12px;
-			border-radius: 4px;
-			font-size: 12px;
+			border: 3px solid #0f0;
+			padding: 14px 18px;
+			border-radius: 6px;
+			font-size: 15px;
 			font-weight: bold;
 			cursor: pointer;
+			-webkit-tap-highlight-color: transparent;
+			touch-action: manipulation;
 			font-family: monospace;
-			box-shadow: 0 2px 4px #000;
+			box-shadow: 0 4px 12px #000;
+			pointer-events: auto;
+			min-width: 80px;
+			min-height: 50px;
 		}
 		#debug-controls button:active { background: #0f0; color: #000; }
 	</style>
@@ -174,10 +181,10 @@
 		Please try updating or use a different browser.
 	</canvas>
 
-	<!-- Debug controls at top-right -->
+	<!-- Debug controls at top-right - no inline onclick to prevent fullscreen -->
 	<div id="debug-controls">
-		<button id="debug-toggle" onclick="toggleDebugLog()">HIDE</button>
-		<button id="debug-copy" onclick="copyDebugLogs()">COPY</button>
+		<button id="debug-toggle" type="button">HIDE</button>
+		<button id="debug-copy" type="button">COPY</button>
 	</div>
 
 	<!-- Debug log panel - always visible at bottom -->
@@ -249,14 +256,40 @@
 				logPanel.style.display = visible ? 'block' : 'none';
 				toggleBtn.textContent = visible ? 'HIDE' : 'SHOW';
 				console.log('[Debug] Toggle clicked, visible:', visible);
+				addLog('info', ['Toggle clicked, visible:', visible]);
 			};
 
-			// Ensure click works on iOS
-			toggleBtn.addEventListener('click', function(e) {
+			// Ensure click works on iOS - use both click and touchend
+			function handleToggle(e) {
 				e.preventDefault();
 				e.stopPropagation();
 				window.toggleDebugLog();
-			}, { passive: false });
+				return false;
+			}
+			// Add listeners after a short delay to ensure DOM is ready
+			setTimeout(function() {
+				toggleBtn.addEventListener('click', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.toggleDebugLog();
+				}, { passive: false });
+				toggleBtn.addEventListener('touchend', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.toggleDebugLog();
+				}, { passive: false });
+				// Also add for copy button
+				copyBtn.addEventListener('click', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.copyDebugLogs();
+				}, { passive: false });
+				copyBtn.addEventListener('touchend', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					window.copyDebugLogs();
+				}, { passive: false });
+			}, 100);
 
 			window.copyDebugLogs = function() {
 				var text = logs.map(function(l) { return l.time + ' [' + l.level.toUpperCase() + '] ' + l.msg; }).join('\n');
@@ -306,8 +339,30 @@
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
+			// iOS Safari compatible WebGL attributes
+			const webglAttributes = {
+				alpha: true,
+				antialias: true,
+				depth: true,
+				stencil: false,
+				premultipliedAlpha: true,
+				preserveDrawingBuffer: true,
+				powerPreference: 'default',
+				failIfMajorPerformanceCaveat: false,
+			};
 			canvas.getContext = function(contextType, attributes) {
-				const context = originalGetContext(contextType, attributes);
+				// Use our stable attributes
+				const mergedAttrs = Object.assign({}, {
+					alpha: true,
+					antialias: true,
+					depth: true,
+					stencil: false,
+					premultipliedAlpha: true,
+					preserveDrawingBuffer: true,
+					powerPreference: 'default',
+					failIfMajorPerformanceCaveat: false,
+				}, attributes || {});
+				const context = originalGetContext(contextType, mergedAttrs);
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
 					patchWebGLContext(context);
 					patchShaderMethods(context);
@@ -337,15 +392,51 @@
 			gl._patchedGetContextAttributes = true;
 		}
 
-		// Handle WebGL context loss on iOS Safari
+		// Handle WebGL context loss on iOS Safari - AGGRESSIVE recovery
 		function setupContextLossHandling(canvas) {
+			let contextLost = false;
+			let restorationAttempts = 0;
+			const MAX_RESTORATION_ATTEMPTS = 5;
+
 			canvas.addEventListener('webglcontextlost', function(event) {
-				event.preventDefault(); // Allow context restoration
+				event.preventDefault();
+				contextLost = true;
+				console.error('[WebGL Fix] CONTEXT LOST! Attempt:', restorationAttempts + 1);
+				
+				// Try to create a new context immediately
+				setTimeout(function attemptRestore() {
+					if (restorationAttempts >= MAX_RESTORATION_ATTEMPTS) {
+						console.error('[WebGL Fix] Max restoration attempts reached');
+						return;
+					}
+					restorationAttempts++;
+					
+					const gl = canvas.getContext('webgl', {
+						alpha: true,
+						antialias: true,
+						depth: true,
+						stencil: false,
+						premultipliedAlpha: true,
+						preserveDrawingBuffer: true,
+						powerPreference: 'default',
+						failIfMajorPerformanceCaveat: false,
+					});
+					
+					if (gl) {
+						patchWebGLContext(gl);
+						patchShaderMethods(gl);
+						contextLost = false;
+						console.log('[WebGL Fix] Context restored successfully on attempt', restorationAttempts);
+					} else if (restorationAttempts < MAX_RESTORATION_ATTEMPTS) {
+						setTimeout(attemptRestore, 1000);
+					}
+				}, 100);
 			}, false);
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
+				console.log('[WebGL Fix] Native context restored event');
 				setTimeout(() => {
-					const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+					const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
 					if (gl) {
 						patchWebGLContext(gl);
 						patchShaderMethods(gl);
@@ -364,40 +455,27 @@
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
 					gl[method] = function(shader, ...args) {
+						// Check context lost FIRST
 						if (gl.isContextLost && gl.isContextLost()) {
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
+						// Accept dummy shaders
 						if (!shader || !(shader instanceof WebGLShader || (shader && shader.__webglFixDummy))) {
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
-						return original(shader, ...args);
+						try {
+							return original(shader, ...args);
+						} catch (e) {
+							if (e.message && e.message.includes('WebGLShader')) {
+								return method === 'getShaderInfoLog' ? '' : undefined;
+							}
+							throw e;
+						}
 					};
 				}
 			});
 
-			// Create a fully functional dummy shader
-			function createDummyShader() {
-				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
-				return new Proxy(dummy, {
-					get(target, prop) {
-						if (prop in target) return target[prop];
-						return function() {};
-					},
-					set(target, prop, value) { target[prop] = value; return true; }
-				});
-			}
-
-			// Patch createShader to NEVER return null
-			const originalCreateShader = gl.createShader.bind(gl);
-			gl.createShader = function(type) {
-				const shader = originalCreateShader(type);
-				if (!shader) {
-					return createDummyShader();
-				}
-				return shader;
-			};
-
-			// Patch program methods too (they can also receive stale objects)
+			// Also patch program methods
 			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform', 'bindAttribLocation', 'getProgramInfoLog'];
 			programMethods.forEach(method => {
 				if (typeof gl[method] === 'function') {
@@ -423,6 +501,28 @@
 					};
 				}
 			});
+
+			// Create a fully functional dummy shader
+			function createDummyShader() {
+				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
+				return new Proxy(dummy, {
+					get(target, prop) {
+						if (prop in target) return target[prop];
+						return function() {};
+					},
+					set(target, prop, value) { target[prop] = value; return true; }
+				});
+			}
+
+			// Patch createShader to NEVER return null
+			const originalCreateShader = gl.createShader.bind(gl);
+			gl.createShader = function(type) {
+				const shader = originalCreateShader(type);
+				if (!shader) {
+					return createDummyShader();
+				}
+				return shader;
+			};
 
 			// Create a fully functional dummy program that accepts any property/method
 			function createDummyProgram() {
@@ -540,6 +640,10 @@
 				// Ensure canvas has valid dimensions
 				if (canvas.width === 0) canvas.width = canvas.clientWidth || window.innerWidth || 320;
 				if (canvas.height === 0) canvas.height = canvas.clientHeight || window.innerHeight || 240;
+
+				// Prevent fullscreen requests from canvas
+				canvas.requestFullscreen = function() { return Promise.reject('Fullscreen disabled'); };
+				canvas.webkitRequestFullscreen = function() { return Promise.reject('Fullscreen disabled'); };
 
 				// Patch ONLY this canvas's getContext - don't patch globally
 				patchCanvasGetContext(canvas);
