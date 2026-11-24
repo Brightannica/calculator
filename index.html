@@ -140,14 +140,27 @@
 	<script type='text/javascript'>//<![CDATA[
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
-		// Patch canvas.getContext to ensure ANY context created has safe getContextAttributes
+		// Patch HTMLCanvasElement.prototype.getContext GLOBALLY so ALL contexts are patched immediately
+		(function patchGlobalGetContext() {
+			const originalGetContext = HTMLCanvasElement.prototype.getContext;
+			HTMLCanvasElement.prototype.getContext = function(contextType, attributes) {
+				const context = originalGetContext.call(this, contextType, attributes);
+				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
+					patchWebGLContext(context);
+					patchShaderMethods(context);
+				}
+				return context;
+			};
+		})();
+
+		// Patch canvas.getContext as backup for already-created contexts
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
 			canvas.getContext = function(contextType, attributes) {
 				const context = originalGetContext(contextType, attributes);
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
 					patchWebGLContext(context);
-					patchShaderMethods(context); // Also patch shader methods on ALL contexts
+					patchShaderMethods(context);
 				}
 				return context;
 			};
@@ -222,13 +235,26 @@
 				}
 			});
 
-			// Patch createShader to detect null returns
+			// Create a fully functional dummy shader
+			function createDummyShader() {
+				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
+				return new Proxy(dummy, {
+					get(target, prop) {
+						if (prop in target) return target[prop];
+						return function() { console.warn('[WebGL Fix] Dummy shader method called:', prop); };
+					},
+					set(target, prop, value) { target[prop] = value; return true; }
+				});
+			}
+
+			// Patch createShader to NEVER return null
 			const originalCreateShader = gl.createShader.bind(gl);
 			gl.createShader = function(type) {
 				const shader = originalCreateShader(type);
 				if (!shader) {
-					console.error('[WebGL Fix] createShader returned null - context may be lost');
+					console.error('[WebGL Fix] createShader returned null - context lost, returning dummy');
 					console.error('[WebGL Fix] GL Error:', gl.getError());
+					return createDummyShader();
 				}
 				return shader;
 			};
@@ -269,18 +295,34 @@
 				}
 			});
 
-			// Patch createProgram to NEVER return null - return a placeholder if context lost
+			// Create a fully functional dummy program that accepts any property/method
+			function createDummyProgram() {
+				const dummy = {
+					__webglFixDummy: true,
+					_type: 'WebGLProgram'
+				};
+				// Allow any property to be set/get (Godot does program.name = id)
+				return new Proxy(dummy, {
+					get(target, prop) {
+						if (prop in target) return target[prop];
+						// Return no-op function for any method access
+						return function() { console.warn('[WebGL Fix] Dummy program method called:', prop); };
+					},
+					set(target, prop, value) {
+						target[prop] = value;
+						return true;
+					}
+				});
+			}
+
+			// Patch createProgram to NEVER return null - return a functional dummy if context lost
 			const originalCreateProgram = gl.createProgram.bind(gl);
 			gl.createProgram = function() {
 				const program = originalCreateProgram();
 				if (!program) {
 					console.error('[WebGL Fix] createProgram returned null - context lost, returning dummy');
 					console.error('[WebGL Fix] GL Error:', gl.getError());
-					// Return a minimal dummy program to prevent null reference errors
-					return {
-						__webglFixDummy: true,
-						_type: 'WebGLProgram'
-					};
+					return createDummyProgram();
 				}
 				return program;
 			};
