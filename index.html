@@ -195,44 +195,56 @@
 	<script type='text/javascript' src='index.js'></script>
 	<script type='text/javascript'>//<![CDATA[
 
-		// Debug log capture - shows logs on page for iOS Safari debugging
+		// Optimized debug log capture - throttled rendering to prevent freezing
 		(function() {
 			const logPanel = document.getElementById('debug-log-panel');
 			const toggleBtn = document.getElementById('debug-toggle');
 			const logs = [];
-			let visible = true; // Start visible
+			let visible = true;
+			let renderScheduled = false;
 
 			function addLog(level, args) {
 				const time = new Date().toLocaleTimeString();
 				const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
 				logs.push({ time, level, msg });
-				if (logs.length > 500) logs.shift();
-				renderLogs();
+				if (logs.length > 100) logs.shift(); // Reduced from 500
+				if (!renderScheduled) {
+					renderScheduled = true;
+					requestAnimationFrame(renderLogs);
+				}
 			}
 
 			function renderLogs() {
+				renderScheduled = false;
+				if (!logPanel) return;
 				logPanel.innerHTML = logs.map(l => 
 					`<div class="log-entry log-${l.level}">`
 					+ `<span class="timestamp">${l.time}</span>`
 					+ `<span class="log-label">[${l.level.toUpperCase()}]</span>`
 					+ `<span>${l.msg}</span></div>`
 				).join('');
-				logPanel.scrollTop = logPanel.scrollHeight;
+				if (visible) logPanel.scrollTop = logPanel.scrollHeight;
 			}
 
 			window.toggleDebugLog = function() {
 				visible = !visible;
 				logPanel.classList.toggle('visible', visible);
 				toggleBtn.textContent = visible ? 'HIDE LOGS' : 'SHOW LOGS';
-				// Ensure panel is always rendered even when toggled
 				if (visible) renderLogs();
 			};
 
-			// Capture all console methods
-			['log', 'warn', 'error', 'info'].forEach(level => {
+			// Capture console methods - only log important stuff to panel
+			['warn', 'error'].forEach(level => {
 				const orig = console[level];
 				console[level] = function(...args) {
 					addLog(level, args);
+					orig.apply(console, args);
+				};
+			});
+			// log/info only go to console, not panel (too verbose during loading)
+			['log', 'info'].forEach(level => {
+				const orig = console[level];
+				console[level] = function(...args) {
 					orig.apply(console, args);
 				};
 			});
@@ -246,8 +258,7 @@
 			});
 
 			// Initial log
-			addLog('info', ['Debug log panel ready - logs shown below']);
-			addLog('info', ['Tap HIDE LOGS to toggle panel']);
+			addLog('info', ['Debug panel ready - shows warnings/errors only']);
 		})();
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
@@ -255,9 +266,7 @@
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
 			canvas.getContext = function(contextType, attributes) {
-				console.log('[WebGL Fix] getContext called:', contextType);
 				const context = originalGetContext(contextType, attributes);
-				console.log('[WebGL Fix] getContext returned:', context ? 'success' : 'null');
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
 					patchWebGLContext(context);
 					patchShaderMethods(context);
@@ -268,16 +277,11 @@
 
 		// Patch a WebGL context to have safe getContextAttributes
 		function patchWebGLContext(gl) {
-			if (gl._patchedGetContextAttributes) {
-				console.log('[WebGL Fix] getContextAttributes already patched');
-				return;
-			}
-			console.log('[WebGL Fix] Patching getContextAttributes');
+			if (gl._patchedGetContextAttributes) return;
 			const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
 			gl.getContextAttributes = function() {
 				const attrs = originalGetContextAttributes();
 				if (attrs === null) {
-					console.warn('[WebGL Fix] getContextAttributes returned null, using defaults');
 					return {
 						alpha: true,
 						antialias: true,
@@ -290,22 +294,18 @@
 				return attrs;
 			};
 			gl._patchedGetContextAttributes = true;
-			console.log('[WebGL Fix] getContextAttributes patched');
 		}
 
 		// Handle WebGL context loss on iOS Safari
 		function setupContextLossHandling(canvas) {
 			canvas.addEventListener('webglcontextlost', function(event) {
-				console.error('[WebGL Fix] CONTEXT LOST EVENT');
 				event.preventDefault(); // Allow context restoration
 			}, false);
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
-				console.log('[WebGL Fix] CONTEXT RESTORED EVENT');
 				setTimeout(() => {
 					const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
 					if (gl) {
-						console.log('[WebGL Fix] Re-patching restored context');
 						patchWebGLContext(gl);
 						patchShaderMethods(gl);
 					}
@@ -315,11 +315,7 @@
 
 		// Patch shader methods to validate shader objects and catch errors early
 		function patchShaderMethods(gl) {
-			if (gl._patchedShaderMethods) {
-				console.log('[WebGL Fix] Shader methods already patched');
-				return;
-			}
-			console.log('[WebGL Fix] Patching shader methods');
+			if (gl._patchedShaderMethods) return;
 			gl._patchedShaderMethods = true;
 
 			const shaderMethods = ['shaderSource', 'compileShader', 'getShaderParameter', 'getShaderInfoLog', 'deleteShader', 'getShaderSource'];
@@ -503,18 +499,15 @@
 				// Ensure canvas has valid dimensions
 				if (canvas.width === 0) canvas.width = canvas.clientWidth || window.innerWidth || 320;
 				if (canvas.height === 0) canvas.height = canvas.clientHeight || window.innerHeight || 240;
-				console.log('[WebGL Fix] Canvas size:', canvas.width, 'x', canvas.height);
 
 				// Patch ONLY this canvas's getContext - don't patch globally
 				patchCanvasGetContext(canvas);
 				setupContextLossHandling(canvas);
 				setStatusMode('indeterminate');
 
-				console.log('[WebGL Fix] Calling engine.startGame...');
 				engine.startGame({
 					'canvas': canvas,
 					'onProgress': function (current, total) {
-						console.log('[WebGL Fix] Progress:', current, '/', total);
 						if (total > 0) {
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
@@ -528,7 +521,6 @@
 						}
 					},
 				}).then(() => {
-					console.log('[WebGL Fix] Engine started successfully!');
 					setStatusMode('hidden');
 					initializing = false;
 				}, function(err) {
