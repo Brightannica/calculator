@@ -181,10 +181,10 @@
 		Please try updating or use a different browser.
 	</canvas>
 
-	<!-- Debug controls at top-right -->
+	<!-- Debug controls at top-right - no inline onclick to prevent fullscreen -->
 	<div id="debug-controls">
-		<button id="debug-toggle" onclick="toggleDebugLog()">HIDE</button>
-		<button id="debug-copy" onclick="copyDebugLogs()">COPY</button>
+		<button id="debug-toggle" type="button">HIDE</button>
+		<button id="debug-copy" type="button">COPY</button>
 	</div>
 
 	<!-- Debug log panel - always visible at bottom -->
@@ -339,8 +339,21 @@
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
+			// Better WebGL context attributes for iOS Safari compatibility
+			const webglAttributes = {
+				alpha: true,
+				antialias: true,
+				depth: true,
+				stencil: true,
+				premultipliedAlpha: true,
+				preserveDrawingBuffer: true,
+				powerPreference: 'high-performance',
+				failIfMajorPerformanceCaveat: false,
+			};
 			canvas.getContext = function(contextType, attributes) {
-				const context = originalGetContext(contextType, attributes);
+				// Merge provided attributes with our better defaults
+				const mergedAttrs = attributes ? Object.assign({}, webglAttributes, attributes) : webglAttributes;
+				const context = originalGetContext(contextType, mergedAttrs);
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
 					patchWebGLContext(context);
 					patchShaderMethods(context);
@@ -573,6 +586,10 @@
 				// Ensure canvas has valid dimensions
 				if (canvas.width === 0) canvas.width = canvas.clientWidth || window.innerWidth || 320;
 				if (canvas.height === 0) canvas.height = canvas.clientHeight || window.innerHeight || 240;
+
+				// Prevent fullscreen requests from canvas
+				canvas.requestFullscreen = function() { return Promise.reject('Fullscreen disabled'); };
+				canvas.webkitRequestFullscreen = function() { return Promise.reject('Fullscreen disabled'); };
 
 				// Patch ONLY this canvas's getContext - don't patch globally
 				patchCanvasGetContext(canvas);
