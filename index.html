@@ -144,9 +144,7 @@
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
 			canvas.getContext = function(contextType, attributes) {
-				console.log('[WebGL Fix] getContext called:', contextType);
 				const context = originalGetContext(contextType, attributes);
-				console.log('[WebGL Fix] getContext returned:', context ? 'success' : 'null');
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
 					patchWebGLContext(context);
 					patchShaderMethods(context);
@@ -158,12 +156,10 @@
 		// Patch a WebGL context to have safe getContextAttributes
 		function patchWebGLContext(gl) {
 			if (gl._patchedGetContextAttributes) return;
-			console.log('[WebGL Fix] Patching getContextAttributes');
 			const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
 			gl.getContextAttributes = function() {
 				const attrs = originalGetContextAttributes();
 				if (attrs === null) {
-					console.warn('[WebGL Fix] getContextAttributes returned null, using defaults');
 					return {
 						alpha: true,
 						antialias: true,
@@ -176,24 +172,20 @@
 				return attrs;
 			};
 			gl._patchedGetContextAttributes = true;
-			console.log('[WebGL Fix] getContextAttributes patched');
 		}
 
 		// Handle WebGL context loss on iOS Safari
 		function setupContextLossHandling(canvas) {
 			canvas.addEventListener('webglcontextlost', function(event) {
 				event.preventDefault(); // Allow context restoration
-				console.warn('[WebGL Fix] Context lost - will attempt restoration');
 			}, false);
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
-				console.log('[WebGL Fix] Context restored - patching new context');
 				setTimeout(() => {
 					const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
 					if (gl) {
 						patchWebGLContext(gl);
 						patchShaderMethods(gl);
-						console.log('[WebGL Fix] Restored context patched');
 					}
 				}, 0);
 			}, false);
@@ -202,7 +194,6 @@
 		// Patch shader methods to validate shader objects and catch errors early
 		function patchShaderMethods(gl) {
 			if (gl._patchedShaderMethods) return;
-			console.log('[WebGL Fix] Patching shader methods');
 			gl._patchedShaderMethods = true;
 
 			const shaderMethods = ['shaderSource', 'compileShader', 'getShaderParameter', 'getShaderInfoLog', 'deleteShader', 'getShaderSource'];
@@ -211,13 +202,9 @@
 					const original = gl[method].bind(gl);
 					gl[method] = function(shader, ...args) {
 						if (gl.isContextLost && gl.isContextLost()) {
-							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
 						if (!shader || !(shader instanceof WebGLShader || (shader && shader.__webglFixDummy))) {
-							console.error(`[WebGL Fix] INVALID SHADER passed to ${method}:`, shader);
-							console.error('[WebGL Fix] Context was likely lost - shader objects are stale');
-							console.trace(`[WebGL Fix] ${method} call stack:`);
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
 						return original(shader, ...args);
@@ -231,7 +218,7 @@
 				return new Proxy(dummy, {
 					get(target, prop) {
 						if (prop in target) return target[prop];
-						return function() { console.warn('[WebGL Fix] Dummy shader method called:', prop); };
+						return function() {};
 					},
 					set(target, prop, value) { target[prop] = value; return true; }
 				});
@@ -242,8 +229,6 @@
 			gl.createShader = function(type) {
 				const shader = originalCreateShader(type);
 				if (!shader) {
-					console.error('[WebGL Fix] createShader returned null - context lost, returning dummy');
-					console.error('[WebGL Fix] GL Error:', gl.getError());
 					return createDummyShader();
 				}
 				return shader;
@@ -256,24 +241,18 @@
 					const original = gl[method].bind(gl);
 					gl[method] = function(program, ...args) {
 						if (gl.isContextLost && gl.isContextLost()) {
-							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
 							return;
 						}
 						if (program === null || program === undefined) {
-							console.error(`[WebGL Fix] NULL PROGRAM passed to ${method} - context likely lost`);
-							console.trace(`[WebGL Fix] ${method} call stack:`);
 							return;
 						}
 						if (!(program instanceof WebGLProgram || (program && program.__webglFixDummy))) {
-							console.error(`[WebGL Fix] INVALID PROGRAM passed to ${method}:`, program);
-							console.trace(`[WebGL Fix] ${method} call stack:`);
 							return;
 						}
 						try {
 							return original(program, ...args);
 						} catch (e) {
 							if (e.message && (e.message.includes('WebGLProgram') || e.message.includes('program.name'))) {
-								console.error(`[WebGL Fix] CAUGHT WebGLProgram error in ${method}:`, e.message);
 								return;
 							}
 							throw e;
@@ -288,7 +267,7 @@
 				return new Proxy(dummy, {
 					get(target, prop) {
 						if (prop in target) return target[prop];
-						return function() { console.warn('[WebGL Fix] Dummy program method called:', prop); };
+						return function() {};
 					},
 					set(target, prop, value) { target[prop] = value; return true; }
 				});
@@ -299,44 +278,18 @@
 			gl.createProgram = function() {
 				const program = originalCreateProgram();
 				if (!program) {
-					console.error('[WebGL Fix] createProgram returned null - context lost, returning dummy');
-					console.error('[WebGL Fix] GL Error:', gl.getError());
 					return createDummyProgram();
 				}
 				return program;
-			};
-
-			// Patch getError to log errors
-			const originalGetError = gl.getError.bind(gl);
-			gl.getError = function() {
-				const error = originalGetError();
-				if (error !== gl.NO_ERROR) {
-					const errorNames = {
-						0x0500: 'INVALID_ENUM',
-						0x0501: 'INVALID_VALUE',
-						0x0502: 'INVALID_OPERATION',
-						0x0503: 'STACK_OVERFLOW',
-						0x0504: 'STACK_UNDERFLOW',
-						0x0505: 'OUT_OF_MEMORY',
-						0x0506: 'INVALID_FRAMEBUFFER_OPERATION',
-						0x0507: 'CONTEXT_LOST_WEBGL'
-					};
-					if (error !== 0x0507) {
-						console.error('[WebGL Fix] GL Error:', errorNames[error] || error);
-					}
-				}
-				return error;
 			};
 		}
 
 		// Global error handlers
 		window.addEventListener('error', function(event) {
-			console.error('[WebGL Fix] Uncaught error:', event.error || event.message);
-			if (event.error && event.error.stack) console.error('[WebGL Fix] Stack:', event.error.stack);
+			console.error(event.error || event.message);
 		});
 		window.addEventListener('unhandledrejection', function(event) {
-			console.error('[WebGL Fix] Unhandled rejection:', event.reason);
-			if (event.reason && event.reason.stack) console.error('[WebGL Fix] Stack:', event.reason.stack);
+			console.error(event.reason);
 		});
 
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
@@ -424,7 +377,6 @@
 				// Ensure canvas has valid dimensions
 				if (canvas.width === 0) canvas.width = canvas.clientWidth || window.innerWidth || 320;
 				if (canvas.height === 0) canvas.height = canvas.clientHeight || window.innerHeight || 240;
-				console.log('[WebGL Fix] Canvas size:', canvas.width, 'x', canvas.height);
 
 				// Patch ONLY this canvas's getContext - don't patch globally
 				patchCanvasGetContext(canvas);
@@ -434,7 +386,6 @@
 				engine.startGame({
 					'canvas': canvas,
 					'onProgress': function (current, total) {
-						console.log('[WebGL Fix] Progress:', current, '/', total);
 						if (total > 0) {
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
@@ -448,12 +399,10 @@
 						}
 					},
 				}).then(() => {
-					console.log('[WebGL Fix] Engine started successfully!');
 					setStatusMode('hidden');
 					initializing = false;
 				}, function(err) {
 					console.error('Engine startGame failed:', err);
-					if (err && err.stack) console.error('Stack:', err.stack);
 					displayFailureNotice(err);
 				});
 			}
