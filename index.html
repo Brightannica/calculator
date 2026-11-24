@@ -234,12 +234,12 @@
 			};
 
 			// Patch program methods too (they can also receive stale objects)
-			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform'];
+			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform', 'bindAttribLocation', 'getProgramInfoLog'];
 			programMethods.forEach(method => {
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
 					gl[method] = function(program, ...args) {
-						// Check for context loss FIRST
+						// Check for context loss FIRST - this catches the real issue
 						if (gl.isContextLost && gl.isContextLost()) {
 							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
 							return;
@@ -249,10 +249,30 @@
 							console.trace(`[WebGL Fix] ${method} call stack:`);
 							return;
 						}
-						return original(program, ...args);
+						// Also check if program is from lost context by checking if it's valid
+						try {
+							return original(program, ...args);
+						} catch (e) {
+							if (e.message && e.message.includes('WebGLProgram')) {
+								console.error(`[WebGL Fix] CAUGHT WebGLProgram error in ${method}:`, e.message);
+								return;
+							}
+							throw e;
+						}
 					};
 				}
 			});
+
+			// Patch createProgram to track programs
+			const originalCreateProgram = gl.createProgram.bind(gl);
+			gl.createProgram = function() {
+				const program = originalCreateProgram();
+				if (!program) {
+					console.error('[WebGL Fix] createProgram returned null - context may be lost');
+					console.error('[WebGL Fix] GL Error:', gl.getError());
+				}
+				return program;
+			};
 
 			// Patch getError to log errors
 			const originalGetError = gl.getError.bind(gl);
