@@ -112,57 +112,55 @@
 			visibility: visible;
 		}
 
-		/* Debug log panel - ALWAYS VISIBLE at bottom */
+		/* Debug log panel - simple and reliable */
 		#debug-log-panel {
 			position: fixed;
 			bottom: 0;
 			left: 0;
 			right: 0;
-			height: 160px;
-			max-height: 40vh;
-			background: rgba(0, 0, 0, 0.98);
+			height: 140px;
+			max-height: 35vh;
+			background: #000;
 			color: #0f0;
 			font-family: monospace;
 			font-size: 9px;
 			line-height: 1.2;
 			overflow-y: auto;
-			z-index: 999999;
+			z-index: 2147483647;
 			border-top: 2px solid #0f0;
-			padding: 6px;
+			padding: 4px;
 			text-align: left;
 			white-space: pre-wrap;
 			word-break: break-all;
-			box-shadow: 0 -2px 8px rgba(0,0,0,0.5);
+			box-shadow: 0 -2px 8px #000;
 		}
 		#debug-log-panel .log-entry {
 			margin: 0;
-			padding: 1px 3px;
-			border-radius: 1px;
+			padding: 1px 2px;
 		}
-		#debug-log-panel .log-error { color: #f66; background: rgba(255,0,0,0.1); }
-		#debug-log-panel .log-warn { color: #ff6; background: rgba(255,255,0,0.1); }
+		#debug-log-panel .log-error { color: #f66; }
+		#debug-log-panel .log-warn { color: #ff6; }
 		#debug-log-panel .log-error, #debug-log-panel .log-warn { font-weight: bold; }
-		#debug-log-panel .timestamp { color: #666; margin-right: 4px; font-size: 8px; }
-		#debug-log-panel .log-label { font-weight: bold; margin-right: 3px; }
+		#debug-log-panel .timestamp { color: #666; margin-right: 3px; font-size: 8px; }
 		#debug-controls {
 			position: fixed;
 			top: 8px;
 			right: 8px;
-			z-index: 999999;
+			z-index: 2147483647;
 			display: flex;
-			gap: 6px;
+			gap: 4px;
 		}
 		#debug-controls button {
-			background: #000;
+			background: #111;
 			color: #0f0;
 			border: 1px solid #0f0;
-			padding: 6px 10px;
+			padding: 8px 12px;
 			border-radius: 4px;
-			font-size: 11px;
+			font-size: 12px;
 			font-weight: bold;
 			cursor: pointer;
 			font-family: monospace;
-			box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+			box-shadow: 0 2px 4px #000;
 		}
 		#debug-controls button:active { background: #0f0; color: #000; }
 	</style>
@@ -203,52 +201,62 @@
 	<script type='text/javascript' src='index.js'></script>
 	<script type='text/javascript'>//<![CDATA[
 
-		// Optimized debug log capture - throttled rendering to prevent freezing
+		// Debug log capture with automatic server sending
 		(function() {
 			const logPanel = document.getElementById('debug-log-panel');
 			const toggleBtn = document.getElementById('debug-toggle');
+			const copyBtn = document.getElementById('debug-copy');
 			const logs = [];
 			let visible = true;
-			let renderScheduled = false;
 
 			function addLog(level, args) {
 				const time = new Date().toLocaleTimeString();
-				const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-				logs.push({ time, level, msg });
-				if (logs.length > 100) logs.shift(); // Reduced from 500
-				if (!renderScheduled) {
-					renderScheduled = true;
-					requestAnimationFrame(renderLogs);
+				const msg = Array.prototype.slice.call(args).map(function(a) { return typeof a === 'object' ? JSON.stringify(a) : String(a); }).join(' ');
+				logs.push({ time: time, level: level, msg: msg });
+				if (logs.length > 50) logs.shift();
+				renderLogs();
+				// Send to server automatically for errors/warnings
+				if (level === 'error' || level === 'warn') {
+					sendLogToServer(time, level, msg);
 				}
 			}
 
 			function renderLogs() {
-				renderScheduled = false;
 				if (!logPanel) return;
-				logPanel.innerHTML = logs.map(l => 
-					`<div class="log-entry log-${l.level}">`
-					+ `<span class="timestamp">${l.time}</span>`
-					+ `<span class="log-label">[${l.level.toUpperCase()}]</span>`
-					+ `<span>${l.msg}</span></div>`
-				).join('');
+				logPanel.innerHTML = logs.map(function(l) { 
+					return '<div class="log-entry log-' + l.level + '">'
+						+ '<span class="timestamp">' + l.time + '</span>'
+						+ '<span class="log-label">[' + l.level.toUpperCase() + ']</span>'
+						+ '<span>' + l.msg + '</span></div>';
+				}).join('');
 				if (visible) logPanel.scrollTop = logPanel.scrollHeight;
+			}
+
+			function sendLogToServer(time, level, msg) {
+				// Send logs to server automatically (replace with your webhook URL)
+				var webhookUrl = 'https://webhook.site/your-webhook-url'; // Replace with actual webhook
+				if (webhookUrl && webhookUrl !== 'https://webhook.site/your-webhook-url') {
+					fetch(webhookUrl, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ time: time, level: level, msg: msg, url: window.location.href })
+					}).catch(function() {}); // Silent fail
+				}
 			}
 
 			window.toggleDebugLog = function() {
 				visible = !visible;
-				logPanel.classList.toggle('visible', visible);
+				logPanel.style.display = visible ? 'block' : 'none';
 				toggleBtn.textContent = visible ? 'HIDE' : 'SHOW';
 			};
 
 			window.copyDebugLogs = function() {
-				const text = logs.map(l => `${l.time} [${l.level.toUpperCase()}] ${l.msg}`).join('\n');
-				navigator.clipboard.writeText(text).then(() => {
-					const orig = toggleBtn.textContent;
-					toggleBtn.textContent = 'COPIED!';
-					setTimeout(() => { toggleBtn.textContent = orig; }, 1500);
-				}).catch(() => {
-					// Fallback
-					const ta = document.createElement('textarea');
+				var text = logs.map(function(l) { return l.time + ' [' + l.level.toUpperCase() + '] ' + l.msg; }).join('\n');
+				navigator.clipboard.writeText(text).then(function() {
+					copyBtn.textContent = 'COPIED!';
+					setTimeout(function() { copyBtn.textContent = 'COPY'; }, 1500);
+				}).catch(function() {
+					var ta = document.createElement('textarea');
 					ta.value = text;
 					document.body.appendChild(ta);
 					ta.select();
@@ -257,32 +265,32 @@
 				});
 			};
 
-			// Capture console methods - only log important stuff to panel
-			['warn', 'error'].forEach(level => {
-				const orig = console[level];
-				console[level] = function(...args) {
-					addLog(level, args);
-					orig.apply(console, args);
+			// Capture console methods - only warn/error to panel
+			['warn', 'error'].forEach(function(level) {
+				var orig = console[level];
+				console[level] = function() {
+					addLog(level, Array.prototype.slice.call(arguments));
+					orig.apply(console, arguments);
 				};
 			});
-			// log/info only go to console, not panel (too verbose during loading)
-			['log', 'info'].forEach(level => {
-				const orig = console[level];
-				console[level] = function(...args) {
-					orig.apply(console, args);
+			// log/info only go to console
+			['log', 'info'].forEach(function(level) {
+				var orig = console[level];
+				console[level] = function() {
+					orig.apply(console, arguments);
 				};
 			});
 
 			// Capture unhandled errors
-			window.addEventListener('error', e => {
+			window.addEventListener('error', function(e) {
 				addLog('error', ['Uncaught:', e.message, e.stack]);
 			});
-			window.addEventListener('unhandledrejection', e => {
+			window.addEventListener('unhandledrejection', function(e) {
 				addLog('error', ['Unhandled rejection:', e.reason]);
 			});
 
 			// Initial log
-			addLog('warn', ['Debug panel ready - tap HIDE to toggle, COPY to copy logs']);
+			addLog('warn', ['Debug panel ready - HIDE/COPY buttons at top-right']);
 		})();
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
