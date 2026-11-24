@@ -140,29 +140,159 @@
 	<script type='text/javascript'>//<![CDATA[
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
-		// Patch HTMLCanvasElement.prototype.getContext GLOBALLY so ALL contexts are patched immediately
-		(function patchGlobalGetContext() {
-			const originalGetContext = HTMLCanvasElement.prototype.getContext;
-			HTMLCanvasElement.prototype.getContext = function(contextType, attributes) {
-				const context = originalGetContext.call(this, contextType, attributes);
-				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
-					patchWebGLContext(context);
-					patchShaderMethods(context);
-				}
-				return context;
-			};
-		})();
+		// Handle WebGL context loss on iOS Safari
+		function setupContextLossHandling(canvas) {
+			canvas.addEventListener('webglcontextlost', function(event) {
+				event.preventDefault(); // Allow context restoration
+				console.warn('[WebGL Fix] Context lost - will attempt restoration');
+			}, false);
 
-		// Patch canvas.getContext as backup for already-created contexts
-		function patchCanvasGetContext(canvas) {
-			const originalGetContext = canvas.getContext.bind(canvas);
-			canvas.getContext = function(contextType, attributes) {
-				const context = originalGetContext(contextType, attributes);
-				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
-					patchWebGLContext(context);
-					patchShaderMethods(context);
+			canvas.addEventListener('webglcontextrestored', function(event) {
+				console.log('[WebGL Fix] Context restored - patching new context');
+				setTimeout(() => {
+					const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+					if (gl) {
+						patchWebGLContext(gl);
+						patchShaderMethods(gl);
+						console.log('[WebGL Fix] Restored context patched');
+					}
+				}, 0);
+			}, false);
+		}
+							console.error('[WebGL Fix] Context was likely lost - shader objects are stale');
+							console.trace(`[WebGL Fix] ${method} call stack:`);
+							return method === 'getShaderInfoLog' ? '' : undefined;
+						}
+						return original(shader, ...args);
+					};
 				}
-				return context;
+			});
+
+			// Create a fully functional dummy shader
+			function createDummyShader() {
+				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
+				return new Proxy(dummy, {
+					get(target, prop) {
+						if (prop in target) return target[prop];
+						return function() { console.warn('[WebGL Fix] Dummy shader method called:', prop); };
+					},
+					set(target, prop, value) { target[prop] = value; return true; }
+				});
+			}
+
+			// Patch createShader to NEVER return null
+			const originalCreateShader = gl.createShader.bind(gl);
+			gl.createShader = function(type) {
+				const shader = originalCreateShader(type);
+				if (!shader) {
+					console.error('[WebGL Fix] createShader returned null - context lost, returning dummy');
+					console.error('[WebGL Fix] GL Error:', gl.getError());
+					return createDummyShader();
+				}
+				return shader;
+			};
+
+			// Patch program methods too (they can also receive stale objects)
+			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform', 'bindAttribLocation', 'getProgramInfoLog'];
+			programMethods.forEach(method => {
+				if (typeof gl[method] === 'function') {
+					const original = gl[method].bind(gl);
+					gl[method] = function(program, ...args) {
+						if (gl.isContextLost && gl.isContextLost()) {
+							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
+							return;
+						}
+						if (program === null || program === undefined) {
+							console.error(`[WebGL Fix] NULL PROGRAM passed to ${method} - context likely lost`);
+							console.trace(`[WebGL Fix] ${method} call stack:`);
+							return;
+						}
+						if (!(program instanceof WebGLProgram || (program && program.__webglFixDummy))) {
+							console.error(`[WebGL Fix] INVALID PROGRAM passed to ${method}:`, program);
+							console.trace(`[WebGL Fix] ${method} call stack:`);
+							return;
+						}
+						try {
+							return original(program, ...args);
+						} catch (e) {
+							if (e.message && (e.message.includes('WebGLProgram') || e.message.includes('program.name'))) {
+								console.error(`[WebGL Fix] CAUGHT WebGLProgram error in ${method}:`, e.message);
+								return;
+							}
+							throw e;
+						}
+					};
+				}
+			});
+
+			// Create a fully functional dummy program that accepts any property/method
+			function createDummyProgram() {
+				const dummy = { __webglFixDummy: true, _type: 'WebGLProgram' };
+				return new Proxy(dummy, {
+					get(target, prop) {
+						if (prop in target) return target[prop];
+						return function() { console.warn('[WebGL Fix] Dummy program method called:', prop); };
+					},
+					set(target, prop, value) { target[prop] = value; return true; }
+				});
+			}
+
+			// Create a fully functional dummy shader
+			function createDummyShader() {
+				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
+				return new Proxy(dummy, {
+					get(target, prop) {
+						if (prop in target) return target[prop];
+						return function() { console.warn('[WebGL Fix] Dummy shader method called:', prop); };
+					},
+					set(target, prop, value) { target[prop] = value; return true; }
+				});
+			}
+
+			// Patch createProgram to NEVER return null - return a functional dummy if context lost
+			const originalCreateProgram = gl.createProgram.bind(gl);
+			gl.createProgram = function() {
+				const program = originalCreateProgram();
+				if (!program) {
+					console.error('[WebGL Fix] createProgram returned null - context lost, returning dummy');
+					console.error('[WebGL Fix] GL Error:', gl.getError());
+					return createDummyProgram();
+				}
+				return program;
+			};
+
+			// Patch createShader to NEVER return null
+			const originalCreateShader = gl.createShader.bind(gl);
+			gl.createShader = function(type) {
+				const shader = originalCreateShader(type);
+				if (!shader) {
+					console.error('[WebGL Fix] createShader returned null - context lost, returning dummy');
+					console.error('[WebGL Fix] GL Error:', gl.getError());
+					return createDummyShader();
+				}
+				return shader;
+			};
+
+			// Patch getError to log errors
+			const originalGetError = gl.getError.bind(gl);
+			gl.getError = function() {
+				const error = originalGetError();
+				if (error !== gl.NO_ERROR) {
+					const errorNames = {
+						0x0500: 'INVALID_ENUM',
+						0x0501: 'INVALID_VALUE',
+						0x0502: 'INVALID_OPERATION',
+						0x0503: 'STACK_OVERFLOW',
+						0x0504: 'STACK_UNDERFLOW',
+						0x0505: 'OUT_OF_MEMORY',
+						0x0506: 'INVALID_FRAMEBUFFER_OPERATION',
+						0x0507: 'CONTEXT_LOST_WEBGL'
+					};
+					if (error !== 0x0507) {
+						console.error('[WebGL Fix] GL Error:', errorNames[error] || error);
+					}
+				}
+				return error;
 			};
 		}
 
