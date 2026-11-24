@@ -244,7 +244,13 @@
 							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
 							return;
 						}
-						if (program !== null && program !== undefined && !(program instanceof WebGLProgram)) {
+						// Reject null/undefined programs explicitly
+						if (program === null || program === undefined) {
+							console.error(`[WebGL Fix] NULL PROGRAM passed to ${method} - context likely lost`);
+							console.trace(`[WebGL Fix] ${method} call stack:`);
+							return;
+						}
+						if (!(program instanceof WebGLProgram)) {
 							console.error(`[WebGL Fix] INVALID PROGRAM passed to ${method}:`, program);
 							console.trace(`[WebGL Fix] ${method} call stack:`);
 							return;
@@ -253,7 +259,7 @@
 						try {
 							return original(program, ...args);
 						} catch (e) {
-							if (e.message && e.message.includes('WebGLProgram')) {
+							if (e.message && (e.message.includes('WebGLProgram') || e.message.includes('program.name'))) {
 								console.error(`[WebGL Fix] CAUGHT WebGLProgram error in ${method}:`, e.message);
 								return;
 							}
@@ -263,13 +269,18 @@
 				}
 			});
 
-			// Patch createProgram to track programs
+			// Patch createProgram to NEVER return null - return a placeholder if context lost
 			const originalCreateProgram = gl.createProgram.bind(gl);
 			gl.createProgram = function() {
 				const program = originalCreateProgram();
 				if (!program) {
-					console.error('[WebGL Fix] createProgram returned null - context may be lost');
+					console.error('[WebGL Fix] createProgram returned null - context lost, returning dummy');
 					console.error('[WebGL Fix] GL Error:', gl.getError());
+					// Return a minimal dummy program to prevent null reference errors
+					return {
+						__webglFixDummy: true,
+						_type: 'WebGLProgram'
+					};
 				}
 				return program;
 			};
