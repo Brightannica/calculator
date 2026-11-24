@@ -347,8 +347,8 @@
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
-			// iOS Safari compatible WebGL attributes
-			const webglAttributes = {
+			// iOS Safari compatible WebGL attributes - stable for both WebGL 1 and 2
+			const stableAttrs = {
 				alpha: true,
 				antialias: true,
 				depth: true,
@@ -359,7 +359,13 @@
 				failIfMajorPerformanceCaveat: false,
 			};
 			canvas.getContext = function(contextType, attributes) {
-				// Use our stable attributes
+				// Force WebGL 1 ONLY on actual iOS devices
+				if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+					if (contextType === 'webgl2' || contextType === 'experimental-webgl2') {
+						contextType = 'webgl';
+					}
+				}
+				// Use stable attributes
 				const mergedAttrs = Object.assign({}, {
 					alpha: true,
 					antialias: true,
