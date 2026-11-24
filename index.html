@@ -205,6 +205,12 @@
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
 					gl[method] = function(shader, ...args) {
+						// Check for context loss FIRST - this is the real cause
+						if (gl.isContextLost && gl.isContextLost()) {
+							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
+							return method === 'getShaderInfoLog' ? '' : undefined;
+						}
+						// Check shader validity
 						if (!shader || !(shader instanceof WebGLShader)) {
 							console.error(`[WebGL Fix] INVALID SHADER passed to ${method}:`, shader);
 							console.error('[WebGL Fix] Context was likely lost - shader objects are stale');
@@ -233,6 +239,11 @@
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
 					gl[method] = function(program, ...args) {
+						// Check for context loss FIRST
+						if (gl.isContextLost && gl.isContextLost()) {
+							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
+							return;
+						}
 						if (program !== null && program !== undefined && !(program instanceof WebGLProgram)) {
 							console.error(`[WebGL Fix] INVALID PROGRAM passed to ${method}:`, program);
 							console.trace(`[WebGL Fix] ${method} call stack:`);
