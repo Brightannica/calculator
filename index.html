@@ -223,8 +223,8 @@
 							console.error(`[WebGL Fix] CONTEXT LOST detected in ${method} - skipping`);
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
-						// Check shader validity
-						if (!shader || !(shader instanceof WebGLShader)) {
+						// Check shader validity - accept real WebGLShader OR our dummy shaders
+						if (!shader || !(shader instanceof WebGLShader || (shader && shader.__webglFixDummy))) {
 							console.error(`[WebGL Fix] INVALID SHADER passed to ${method}:`, shader);
 							console.error('[WebGL Fix] Context was likely lost - shader objects are stale');
 							console.trace(`[WebGL Fix] ${method} call stack:`);
@@ -276,7 +276,8 @@
 							console.trace(`[WebGL Fix] ${method} call stack:`);
 							return;
 						}
-						if (!(program instanceof WebGLProgram)) {
+						// Accept real WebGLProgram OR our dummy programs
+						if (!(program instanceof WebGLProgram || (program && program.__webglFixDummy))) {
 							console.error(`[WebGL Fix] INVALID PROGRAM passed to ${method}:`, program);
 							console.trace(`[WebGL Fix] ${method} call stack:`);
 							return;
