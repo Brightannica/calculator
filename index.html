@@ -111,6 +111,57 @@
 			padding: 4px 6px;
 			visibility: visible;
 		}
+
+		/* Debug log panel */
+		#debug-log-panel {
+			position: fixed;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			height: 200px;
+			background: rgba(0, 0, 0, 0.95);
+			color: #0f0;
+			font-family: monospace;
+			font-size: 11px;
+			line-height: 1.4;
+			overflow-y: auto;
+			z-index: 10000;
+			border-top: 2px solid #0f0;
+			padding: 10px;
+			text-align: left;
+			white-space: pre-wrap;
+			word-break: break-all;
+			display: none;
+		}
+		#debug-log-panel.visible {
+			display: block;
+		}
+		#debug-log-panel .log-entry {
+			margin: 2px 0;
+			padding: 2px 5px;
+			border-radius: 3px;
+		}
+		#debug-log-panel .log-error { color: #f66; background: rgba(255,0,0,0.1); }
+		#debug-log-panel .log-warn { color: #ff6; background: rgba(255,255,0,0.1); }
+		#debug-log-panel .log-log { color: #0f0; }
+		#debug-log-panel .log-info { color: #6af; }
+		#debug-log-panel .timestamp { color: #888; margin-right: 8px; }
+		#debug-log-panel .log-label { font-weight: bold; margin-right: 5px; }
+		#debug-toggle {
+			position: fixed;
+			bottom: 210px;
+			right: 10px;
+			background: #333;
+			color: #0f0;
+			border: 1px solid #0f0;
+			padding: 8px 12px;
+			border-radius: 4px;
+			font-size: 12px;
+			cursor: pointer;
+			z-index: 10001;
+			font-family: monospace;
+		}
+		#debug-toggle:active { background: #0f0; color: #000; }
 	</style>
 <link id='-gd-engine-icon' rel='icon' type='image/png' href='index.icon.png' />
 <link rel='apple-touch-icon' href='index.apple-touch-icon.png'/>
@@ -121,6 +172,11 @@
 		HTML5 canvas appears to be unsupported in the current browser.<br />
 		Please try updating or use a different browser.
 	</canvas>
+
+	<!-- Debug log panel - tap to toggle -->
+	<div id="debug-toggle" onclick="toggleDebugLog()">SHOW LOGS</div>
+	<div id="debug-log-panel"></div>
+
 	<div id='status'>
 		<div id='status-progress' style='display: none;' oncontextmenu='event.preventDefault();'><div id ='status-progress-inner'></div></div>
 		<div id='status-indeterminate' style='display: none;' oncontextmenu='event.preventDefault();'>
@@ -138,6 +194,58 @@
 
 	<script type='text/javascript' src='index.js'></script>
 	<script type='text/javascript'>//<![CDATA[
+
+		// Debug log capture - shows logs on page for iOS Safari debugging
+		(function() {
+			const logPanel = document.getElementById('debug-log-panel');
+			const toggleBtn = document.getElementById('debug-toggle');
+			const logs = [];
+			let visible = false;
+
+			function addLog(level, args) {
+				const time = new Date().toLocaleTimeString();
+				const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+				logs.push({ time, level, msg });
+				if (logs.length > 500) logs.shift();
+				renderLogs();
+			}
+
+			function renderLogs() {
+				logPanel.innerHTML = logs.map(l => 
+					`<div class="log-entry log-${l.level}">`
+					+ `<span class="timestamp">${l.time}</span>`
+					+ `<span class="log-label">[${l.level.toUpperCase()}]</span>`
+					+ `<span>${l.msg}</span></div>`
+				).join('');
+				logPanel.scrollTop = logPanel.scrollHeight;
+			}
+
+			window.toggleDebugLog = function() {
+				visible = !visible;
+				logPanel.classList.toggle('visible', visible);
+				toggleBtn.textContent = visible ? 'HIDE LOGS' : 'SHOW LOGS';
+			};
+
+			// Capture all console methods
+			['log', 'warn', 'error', 'info'].forEach(level => {
+				const orig = console[level];
+				console[level] = function(...args) {
+					addLog(level, args);
+					orig.apply(console, args);
+				};
+			});
+
+			// Capture unhandled errors
+			window.addEventListener('error', e => {
+				addLog('error', ['Uncaught:', e.message, e.stack]);
+			});
+			window.addEventListener('unhandledrejection', e => {
+				addLog('error', ['Unhandled rejection:', e.reason]);
+			});
+
+			// Initial log
+			addLog('info', ['Debug log panel ready - tap SHOW LOGS to view']);
+		})();
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
