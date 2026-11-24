@@ -347,8 +347,19 @@
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
+			// iOS Safari compatible WebGL attributes
+			const webglAttributes = {
+				alpha: true,
+				antialias: true,
+				depth: true,
+				stencil: false,
+				premultipliedAlpha: true,
+				preserveDrawingBuffer: true,
+				powerPreference: 'default',
+				failIfMajorPerformanceCaveat: false,
+			};
 			canvas.getContext = function(contextType, attributes) {
-				// Use stable attributes - let engine choose WebGL version but with stable attrs
+				// Use our stable attributes
 				const mergedAttrs = Object.assign({}, {
 					alpha: true,
 					antialias: true,
