@@ -200,20 +200,23 @@
 			if (gl._patchedShaderMethods) return;
 			gl._patchedShaderMethods = true;
 
-			// Patch shaderSource to validate shader object
-			const originalShaderSource = gl.shaderSource.bind(gl);
-			gl.shaderSource = function(shader, source) {
-				if (!shader || !(shader instanceof WebGLShader)) {
-					console.error('[WebGL Fix] INVALID SHADER passed to shaderSource:', shader);
-					console.error('[WebGL Fix] This indicates context was lost and shader objects are stale');
-					console.trace('[WebGL Fix] shaderSource call stack:');
-					// Don't call original - would throw
-					return;
+			const shaderMethods = ['shaderSource', 'compileShader', 'getShaderParameter', 'getShaderInfoLog', 'deleteShader'];
+			shaderMethods.forEach(method => {
+				if (typeof gl[method] === 'function') {
+					const original = gl[method].bind(gl);
+					gl[method] = function(shader, ...args) {
+						if (!shader || !(shader instanceof WebGLShader)) {
+							console.error(`[WebGL Fix] INVALID SHADER passed to ${method}:`, shader);
+							console.error('[WebGL Fix] Context was likely lost - shader objects are stale');
+							console.trace(`[WebGL Fix] ${method} call stack:`);
+							return method === 'getShaderInfoLog' ? '' : undefined;
+						}
+						return original(shader, ...args);
+					};
 				}
-				return originalShaderSource(shader, source);
-			};
+			});
 
-			// Patch createShader to log failures
+			// Patch createShader to detect null returns
 			const originalCreateShader = gl.createShader.bind(gl);
 			gl.createShader = function(type) {
 				const shader = originalCreateShader(type);
@@ -223,6 +226,22 @@
 				}
 				return shader;
 			};
+
+			// Patch program methods too (they can also receive stale objects)
+			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram'];
+			programMethods.forEach(method => {
+				if (typeof gl[method] === 'function') {
+					const original = gl[method].bind(gl);
+					gl[method] = function(program, ...args) {
+						if (program !== null && program !== undefined && !(program instanceof WebGLProgram)) {
+							console.error(`[WebGL Fix] INVALID PROGRAM passed to ${method}:`, program);
+							console.trace(`[WebGL Fix] ${method} call stack:`);
+							return;
+						}
+						return original(program, ...args);
+					};
+				}
+			});
 
 			// Patch getError to log errors
 			const originalGetError = gl.getError.bind(gl);
@@ -239,7 +258,7 @@
 						0x0506: 'INVALID_FRAMEBUFFER_OPERATION',
 						0x0507: 'CONTEXT_LOST_WEBGL'
 					};
-					if (error !== 0x0507) { // Don't spam CONTEXT_LOST
+					if (error !== 0x0507) {
 						console.error('[WebGL Fix] GL Error:', errorNames[error] || error);
 					}
 				}
