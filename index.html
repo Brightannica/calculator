@@ -118,50 +118,53 @@
 			bottom: 0;
 			left: 0;
 			right: 0;
-			height: 180px;
-			max-height: 50vh;
+			height: 160px;
+			max-height: 40vh;
 			background: rgba(0, 0, 0, 0.98);
 			color: #0f0;
 			font-family: monospace;
-			font-size: 10px;
-			line-height: 1.3;
+			font-size: 9px;
+			line-height: 1.2;
 			overflow-y: auto;
 			z-index: 999999;
-			border-top: 3px solid #0f0;
-			padding: 8px;
+			border-top: 2px solid #0f0;
+			padding: 6px;
 			text-align: left;
 			white-space: pre-wrap;
 			word-break: break-all;
-			box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
+			box-shadow: 0 -2px 8px rgba(0,0,0,0.5);
 		}
 		#debug-log-panel .log-entry {
-			margin: 1px 0;
-			padding: 1px 4px;
-			border-radius: 2px;
+			margin: 0;
+			padding: 1px 3px;
+			border-radius: 1px;
 		}
-		#debug-log-panel .log-error { color: #f66; background: rgba(255,0,0,0.15); }
-		#debug-log-panel .log-warn { color: #ff6; background: rgba(255,255,0,0.15); }
-		#debug-log-panel .log-log { color: #0f0; }
-		#debug-log-panel .log-info { color: #6af; }
-		#debug-log-panel .timestamp { color: #888; margin-right: 6px; font-size: 9px; }
-		#debug-log-panel .log-label { font-weight: bold; margin-right: 4px; }
-		#debug-toggle {
+		#debug-log-panel .log-error { color: #f66; background: rgba(255,0,0,0.1); }
+		#debug-log-panel .log-warn { color: #ff6; background: rgba(255,255,0,0.1); }
+		#debug-log-panel .log-error, #debug-log-panel .log-warn { font-weight: bold; }
+		#debug-log-panel .timestamp { color: #666; margin-right: 4px; font-size: 8px; }
+		#debug-log-panel .log-label { font-weight: bold; margin-right: 3px; }
+		#debug-controls {
 			position: fixed;
-			top: 10px;
-			right: 10px;
+			top: 8px;
+			right: 8px;
+			z-index: 999999;
+			display: flex;
+			gap: 6px;
+		}
+		#debug-controls button {
 			background: #000;
 			color: #0f0;
-			border: 2px solid #0f0;
-			padding: 10px 14px;
-			border-radius: 6px;
-			font-size: 13px;
+			border: 1px solid #0f0;
+			padding: 6px 10px;
+			border-radius: 4px;
+			font-size: 11px;
 			font-weight: bold;
 			cursor: pointer;
-			z-index: 999999;
 			font-family: monospace;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+			box-shadow: 0 1px 4px rgba(0,0,0,0.5);
 		}
-		#debug-toggle:active { background: #0f0; color: #000; }
+		#debug-controls button:active { background: #0f0; color: #000; }
 	</style>
 <link id='-gd-engine-icon' rel='icon' type='image/png' href='index.icon.png' />
 <link rel='apple-touch-icon' href='index.apple-touch-icon.png'/>
@@ -173,8 +176,13 @@
 		Please try updating or use a different browser.
 	</canvas>
 
+	<!-- Debug controls at top-right -->
+	<div id="debug-controls">
+		<button id="debug-toggle" onclick="toggleDebugLog()">HIDE</button>
+		<button id="debug-copy" onclick="copyDebugLogs()">COPY</button>
+	</div>
+
 	<!-- Debug log panel - always visible at bottom -->
-	<div id="debug-toggle" onclick="toggleDebugLog()">HIDE LOGS</div>
 	<div id="debug-log-panel" class="visible"></div>
 
 	<div id='status'>
@@ -229,8 +237,24 @@
 			window.toggleDebugLog = function() {
 				visible = !visible;
 				logPanel.classList.toggle('visible', visible);
-				toggleBtn.textContent = visible ? 'HIDE LOGS' : 'SHOW LOGS';
-				if (visible) renderLogs();
+				toggleBtn.textContent = visible ? 'HIDE' : 'SHOW';
+			};
+
+			window.copyDebugLogs = function() {
+				const text = logs.map(l => `${l.time} [${l.level.toUpperCase()}] ${l.msg}`).join('\n');
+				navigator.clipboard.writeText(text).then(() => {
+					const orig = toggleBtn.textContent;
+					toggleBtn.textContent = 'COPIED!';
+					setTimeout(() => { toggleBtn.textContent = orig; }, 1500);
+				}).catch(() => {
+					// Fallback
+					const ta = document.createElement('textarea');
+					ta.value = text;
+					document.body.appendChild(ta);
+					ta.select();
+					document.execCommand('copy');
+					document.body.removeChild(ta);
+				});
 			};
 
 			// Capture console methods - only log important stuff to panel
@@ -258,7 +282,7 @@
 			});
 
 			// Initial log
-			addLog('info', ['Debug panel ready - shows warnings/errors only']);
+			addLog('warn', ['Debug panel ready - tap HIDE to toggle, COPY to copy logs']);
 		})();
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
