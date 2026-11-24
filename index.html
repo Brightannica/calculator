@@ -248,7 +248,15 @@
 				visible = !visible;
 				logPanel.style.display = visible ? 'block' : 'none';
 				toggleBtn.textContent = visible ? 'HIDE' : 'SHOW';
+				console.log('[Debug] Toggle clicked, visible:', visible);
 			};
+
+			// Ensure click works on iOS
+			toggleBtn.addEventListener('click', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				window.toggleDebugLog();
+			}, { passive: false });
 
 			window.copyDebugLogs = function() {
 				var text = logs.map(function(l) { return l.time + ' [' + l.level.toUpperCase() + '] ' + l.msg; }).join('\n');
@@ -291,6 +299,7 @@
 
 			// Initial log
 			addLog('warn', ['Debug panel ready - HIDE/COPY buttons at top-right']);
+			addLog('info', ['Test: click HIDE button to toggle panel']);
 		})();
 
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
