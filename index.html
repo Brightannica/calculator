@@ -144,7 +144,9 @@
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
 			canvas.getContext = function(contextType, attributes) {
+				console.log('[WebGL Fix] getContext called:', contextType);
 				const context = originalGetContext(contextType, attributes);
+				console.log('[WebGL Fix] getContext returned:', context ? 'success' : 'null');
 				if (context && (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl')) {
 					patchWebGLContext(context);
 					patchShaderMethods(context);
@@ -156,10 +158,12 @@
 		// Patch a WebGL context to have safe getContextAttributes
 		function patchWebGLContext(gl) {
 			if (gl._patchedGetContextAttributes) return;
+			console.log('[WebGL Fix] Patching getContextAttributes');
 			const originalGetContextAttributes = gl.getContextAttributes.bind(gl);
 			gl.getContextAttributes = function() {
 				const attrs = originalGetContextAttributes();
 				if (attrs === null) {
+					console.warn('[WebGL Fix] getContextAttributes returned null, using defaults');
 					return {
 						alpha: true,
 						antialias: true,
@@ -172,6 +176,7 @@
 				return attrs;
 			};
 			gl._patchedGetContextAttributes = true;
+			console.log('[WebGL Fix] getContextAttributes patched');
 		}
 
 		// Handle WebGL context loss on iOS Safari
@@ -197,6 +202,7 @@
 		// Patch shader methods to validate shader objects and catch errors early
 		function patchShaderMethods(gl) {
 			if (gl._patchedShaderMethods) return;
+			console.log('[WebGL Fix] Patching shader methods');
 			gl._patchedShaderMethods = true;
 
 			const shaderMethods = ['shaderSource', 'compileShader', 'getShaderParameter', 'getShaderInfoLog', 'deleteShader', 'getShaderSource'];
@@ -415,6 +421,11 @@
 				displayFailureNotice('WebGL not available');
 			} else {
 				const canvas = document.getElementById('canvas');
+				// Ensure canvas has valid dimensions
+				if (canvas.width === 0) canvas.width = canvas.clientWidth || window.innerWidth || 320;
+				if (canvas.height === 0) canvas.height = canvas.clientHeight || window.innerHeight || 240;
+				console.log('[WebGL Fix] Canvas size:', canvas.width, 'x', canvas.height);
+
 				// Patch ONLY this canvas's getContext - don't patch globally
 				patchCanvasGetContext(canvas);
 				setupContextLossHandling(canvas);
@@ -423,6 +434,7 @@
 				engine.startGame({
 					'canvas': canvas,
 					'onProgress': function (current, total) {
+						console.log('[WebGL Fix] Progress:', current, '/', total);
 						if (total > 0) {
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
@@ -436,10 +448,12 @@
 						}
 					},
 				}).then(() => {
+					console.log('[WebGL Fix] Engine started successfully!');
 					setStatusMode('hidden');
 					initializing = false;
 				}, function(err) {
 					console.error('Engine startGame failed:', err);
+					if (err && err.stack) console.error('Stack:', err.stack);
 					displayFailureNotice(err);
 				});
 			}
