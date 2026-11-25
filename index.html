@@ -406,6 +406,40 @@
 			gl._patchedGetContextAttributes = true;
 		}
 
+		// Add visibility change handler to pause when tab is hidden
+		function setupVisibilityHandling(canvas) {
+			let wasVisible = true;
+			document.addEventListener('visibilitychange', function() {
+				if (document.hidden) {
+					wasVisible = false;
+					console.log('[WebGL Fix] Tab hidden - pausing game');
+					// Try to pause the game
+					if (engine && engine.rtenv && engine.rtenv.request_quit) {
+						// Don't quit, just let it pause naturally
+					}
+				} else {
+					if (!wasVisible) {
+						console.log('[WebGL Fix] Tab visible again - resuming');
+						wasVisible = true;
+						// Check context health
+						setTimeout(function() {
+							const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
+							if (gl) {
+								if (gl.isContextLost && gl.isContextLost()) {
+									console.error('[WebGL Fix] Context lost after visibility change');
+									// Trigger recovery
+									canvas.dispatchEvent(new Event('webglcontextlost'));
+								} else {
+									patchWebGLContext(gl);
+									patchShaderMethods(gl);
+								}
+							}
+						}, 100);
+					}
+				}
+			});
+		}
+
 		// Handle WebGL context loss on iOS Safari - AGGRESSIVE recovery with Godot reinitialization
 		function setupContextLossHandling(canvas) {
 			let contextLost = false;
@@ -424,7 +458,7 @@
 				}
 				
 				// Try to restart the engine
-				setTimeout(() => {
+				setTimeout(function() {
 					if (engine && engine.startGame) {
 						engine.startGame({
 							'canvas': canvas,
@@ -433,7 +467,7 @@
 									statusProgressInner.style.width = current/total * 100 + '%';
 									setStatusMode('progress');
 									if (current === total) {
-										setTimeout(() => {
+										setTimeout(function() {
 											setStatusMode('indeterminate');
 										}, 500);
 									}
@@ -441,7 +475,7 @@
 									setStatusMode('indeterminate');
 								}
 							},
-						}).then(() => {
+						}).then(function() {
 							console.log('[WebGL Fix] Engine reinitialized after context loss');
 							setStatusMode('hidden');
 							initializing = false;
@@ -453,6 +487,7 @@
 								setTimeout(attemptEngineReinit, 2000);
 							}
 						});
+					}
 				}, 500);
 			}
 
@@ -498,7 +533,7 @@
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
 				console.log('[WebGL Fix] Native context restored event');
-				setTimeout(() => {
+				setTimeout(function() {
 					const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
 					if (gl) {
 						patchWebGLContext(gl);
@@ -705,6 +740,12 @@
 				// Ensure canvas has valid dimensions
 				if (canvas.width === 0) canvas.width = canvas.clientWidth || window.innerWidth || 320;
 				if (canvas.height === 0) canvas.height = canvas.clientHeight || window.innerHeight || 240;
+				
+				// Reduce canvas resolution for iOS Safari to prevent context loss
+				if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+					canvas.width = Math.min(canvas.width, 1024);
+					canvas.height = Math.min(canvas.height, 768);
+				}
 
 				// Prevent fullscreen requests from canvas
 				canvas.requestFullscreen = function() { return Promise.reject('Fullscreen disabled'); };
@@ -713,6 +754,19 @@
 				// Patch ONLY this canvas's getContext - don't patch globally
 				patchCanvasGetContext(canvas);
 				setupContextLossHandling(canvas);
+				setupVisibilityHandling(canvas);
+				
+				// Periodic context health check for iOS Safari
+				if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+					setInterval(function() {
+						const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
+						if (gl && gl.isContextLost && gl.isContextLost()) {
+							console.error('[WebGL Fix] Periodic check: Context lost detected');
+							canvas.dispatchEvent(new Event('webglcontextlost'));
+						}
+					}, 5000);
+				}
+				
 				setStatusMode('indeterminate');
 
 				engine.startGame({
@@ -722,7 +776,7 @@
 							statusProgressInner.style.width = current/total * 100 + '%';
 							setStatusMode('progress');
 							if (current === total) {
-								setTimeout(() => {
+								setTimeout(function() {
 									setStatusMode('indeterminate');
 								}, 500);
 							}
@@ -730,7 +784,7 @@
 							setStatusMode('indeterminate');
 						}
 					},
-				}).then(() => {
+				}).then(function() {
 					setStatusMode('hidden');
 					initializing = false;
 				}, function(err) {
