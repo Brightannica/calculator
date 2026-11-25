@@ -743,8 +743,8 @@
 				
 				// Reduce canvas resolution for iOS Safari to prevent context loss
 				if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-					canvas.width = Math.min(canvas.width, 1024);
-					canvas.height = Math.min(canvas.height, 768);
+					canvas.width = Math.min(canvas.width, 768);
+					canvas.height = Math.min(canvas.height, 512);
 				}
 
 				// Prevent fullscreen requests from canvas
