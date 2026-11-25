@@ -42,10 +42,6 @@
 			box-shadow: 0 0 1px 1px #2f2d35;
 		}
 
-
-		/* Status display
-		 * ============== */
-
 		#status {
 			position: absolute;
 			left: 0;
@@ -55,7 +51,6 @@
 			display: flex;
 			justify-content: center;
 			align-items: center;
-			/* don't consume click events - make children visible explicitly */
 			visibility: hidden;
 		}
 
@@ -119,65 +114,6 @@
 			padding: 4px 6px;
 			visibility: visible;
 		}
-
-		/* Debug log panel - simple and reliable */
-		#debug-log-panel {
-			position: fixed;
-			bottom: 0;
-			left: 0;
-			right: 0;
-			height: 140px;
-			max-height: 35vh;
-			background: #000;
-			color: #0f0;
-			font-family: monospace;
-			font-size: 9px;
-			line-height: 1.2;
-			overflow-y: auto;
-			z-index: 2147483647;
-			border-top: 2px solid #0f0;
-			padding: 4px;
-			text-align: left;
-			white-space: pre-wrap;
-			word-break: break-all;
-			box-shadow: 0 -2px 8px #000;
-			pointer-events: auto;
-		}
-		#debug-log-panel .log-entry {
-			margin: 0;
-			padding: 1px 2px;
-		}
-		#debug-log-panel .log-error { color: #f66; }
-		#debug-log-panel .log-warn { color: #ff6; }
-		#debug-log-panel .log-error, #debug-log-panel .log-warn { font-weight: bold; }
-		#debug-log-panel .timestamp { color: #666; margin-right: 3px; font-size: 8px; }
-		#debug-controls {
-			position: fixed;
-			top: 8px;
-			right: 8px;
-			z-index: 2147483647;
-			display: flex;
-			gap: 8px;
-			pointer-events: auto;
-		}
-		#debug-controls button {
-			background: #000;
-			color: #0f0;
-			border: 3px solid #0f0;
-			padding: 14px 18px;
-			border-radius: 6px;
-			font-size: 15px;
-			font-weight: bold;
-			cursor: pointer;
-			-webkit-tap-highlight-color: transparent;
-			touch-action: manipulation;
-			font-family: monospace;
-			box-shadow: 0 4px 12px #000;
-			pointer-events: auto;
-			min-width: 80px;
-			min-height: 50px;
-		}
-		#debug-controls button:active { background: #0f0; color: #000; }
 	</style>
 <link id='-gd-engine-icon' rel='icon' type='image/png' href='index.icon.png' />
 <link rel='apple-touch-icon' href='index.apple-touch-icon.png'/>
@@ -188,16 +124,6 @@
 		HTML5 canvas appears to be unsupported in the current browser.<br />
 		Please try updating or use a different browser.
 	</canvas>
-
-	<!-- Debug controls at top-right - no inline onclick to prevent fullscreen -->
-	<div id="debug-controls">
-		<button id="debug-toggle" type="button">HIDE</button>
-		<button id="debug-copy" type="button">COPY</button>
-	</div>
-
-	<!-- Debug log panel - always visible at bottom -->
-	<div id="debug-log-panel" class="visible"></div>
-
 	<div id='status'>
 		<div id='status-progress' style='display: none;' oncontextmenu='event.preventDefault();'><div id ='status-progress-inner'></div></div>
 		<div id='status-indeterminate' style='display: none;' oncontextmenu='event.preventDefault();'>
@@ -216,163 +142,25 @@
 	<script type='text/javascript' src='index.js'></script>
 	<script type='text/javascript'>//<![CDATA[
 
-		// Debug log capture with automatic server sending
-		(function() {
-			const logPanel = document.getElementById('debug-log-panel');
-			const toggleBtn = document.getElementById('debug-toggle');
-			const copyBtn = document.getElementById('debug-copy');
-			const logs = [];
-			let visible = true;
-
-			function addLog(level, args) {
-				const time = new Date().toLocaleTimeString();
-				const msg = Array.prototype.slice.call(args).map(function(a) { return typeof a === 'object' ? JSON.stringify(a) : String(a); }).join(' ');
-				logs.push({ time: time, level: level, msg: msg });
-				if (logs.length > 50) logs.shift();
-				renderLogs();
-				// Send to server automatically for errors/warnings
-				if (level === 'error' || level === 'warn') {
-					sendLogToServer(time, level, msg);
-				}
-			}
-
-			function renderLogs() {
-				if (!logPanel) return;
-				logPanel.innerHTML = logs.map(function(l) { 
-					return '<div class="log-entry log-' + l.level + '">'
-						+ '<span class="timestamp">' + l.time + '</span>'
-						+ '<span class="log-label">[' + l.level.toUpperCase() + ']</span>'
-						+ '<span>' + l.msg + '</span></div>';
-				}).join('');
-				if (visible) logPanel.scrollTop = logPanel.scrollHeight;
-			}
-
-			function sendLogToServer(time, level, msg) {
-				// Send logs to server automatically (replace with your webhook URL)
-				var webhookUrl = 'https://webhook.site/your-webhook-url'; // Replace with actual webhook
-				if (webhookUrl && webhookUrl !== 'https://webhook.site/your-webhook-url') {
-					fetch(webhookUrl, {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ time: time, level: level, msg: msg, url: window.location.href })
-					}).catch(function() {}); // Silent fail
-				}
-			}
-
-			window.toggleDebugLog = function() {
-				visible = !visible;
-				logPanel.style.display = visible ? 'block' : 'none';
-				toggleBtn.textContent = visible ? 'HIDE' : 'SHOW';
-				console.log('[Debug] Toggle clicked, visible:', visible);
-				addLog('info', ['Toggle clicked, visible:', visible]);
-			};
-
-			// Ensure click works on iOS - use both click and touchend
-			function handleToggle(e) {
-				e.preventDefault();
-				e.stopPropagation();
-				window.toggleDebugLog();
-				return false;
-			}
-			// Add listeners after a short delay to ensure DOM is ready
-			setTimeout(function() {
-				toggleBtn.addEventListener('click', function(e) {
-					e.preventDefault();
-					e.stopPropagation();
-					window.toggleDebugLog();
-				}, { passive: false });
-				toggleBtn.addEventListener('touchend', function(e) {
-					e.preventDefault();
-					e.stopPropagation();
-					window.toggleDebugLog();
-				}, { passive: false });
-				// Also add for copy button
-				copyBtn.addEventListener('click', function(e) {
-					e.preventDefault();
-					e.stopPropagation();
-					window.copyDebugLogs();
-				}, { passive: false });
-				copyBtn.addEventListener('touchend', function(e) {
-					e.preventDefault();
-					e.stopPropagation();
-					window.copyDebugLogs();
-				}, { passive: false });
-			}, 100);
-
-			window.copyDebugLogs = function() {
-				var text = logs.map(function(l) { return l.time + ' [' + l.level.toUpperCase() + '] ' + l.msg; }).join('\n');
-				navigator.clipboard.writeText(text).then(function() {
-					copyBtn.textContent = 'COPIED!';
-					setTimeout(function() { copyBtn.textContent = 'COPY'; }, 1500);
-				}).catch(function() {
-					var ta = document.createElement('textarea');
-					ta.value = text;
-					document.body.appendChild(ta);
-					ta.select();
-					document.execCommand('copy');
-					document.body.removeChild(ta);
-				});
-			};
-
-			// Capture console methods - only warn/error to panel
-			['warn', 'error'].forEach(function(level) {
-				var orig = console[level];
-				console[level] = function() {
-					addLog(level, Array.prototype.slice.call(arguments));
-					orig.apply(console, arguments);
-				};
-			});
-			// log/info only go to console
-			['log', 'info'].forEach(function(level) {
-				var orig = console[level];
-				console[level] = function() {
-					orig.apply(console, arguments);
-				};
-			});
-
-			// Capture unhandled errors
-			window.addEventListener('error', function(e) {
-				addLog('error', ['Uncaught:', e.message, e.stack]);
-			});
-			window.addEventListener('unhandledrejection', function(e) {
-				addLog('error', ['Unhandled rejection:', e.reason]);
-			});
-
-			// Initial log
-			addLog('warn', ['Debug panel ready - HIDE/COPY buttons at top-right']);
-			addLog('info', ['Test: click HIDE button to toggle panel']);
-		})();
-
 		// Fix for iOS Safari WebGL context issue: getContextAttributes() can return null
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
-			// iOS Safari compatible WebGL attributes - stable for both WebGL 1 and 2
-			const stableAttrs = {
-				alpha: true,
-				antialias: true,
-				depth: true,
-				stencil: false,
-				premultipliedAlpha: true,
-				preserveDrawingBuffer: true,
-				powerPreference: 'default',
-				failIfMajorPerformanceCaveat: false,
-			};
 			canvas.getContext = function(contextType, attributes) {
-				// Force WebGL 1 ONLY on actual iOS devices
+				// Force WebGL 1 on iOS Safari for maximum stability
 				if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
 					if (contextType === 'webgl2' || contextType === 'experimental-webgl2') {
 						contextType = 'webgl';
 					}
 				}
-				// Use stable attributes - minimal for iOS
+				// Use stable attributes
 				const mergedAttrs = Object.assign({}, {
 					alpha: true,
 					antialias: true,
 					depth: true,
 					stencil: false,
 					premultipliedAlpha: true,
-					preserveDrawingBuffer: false,  // false for iOS stability
+					preserveDrawingBuffer: false,
 					powerPreference: 'default',
 					failIfMajorPerformanceCaveat: false,
 				}, attributes || {});
@@ -406,140 +194,18 @@
 			gl._patchedGetContextAttributes = true;
 		}
 
-		// Add visibility change handler to pause when tab is hidden
-		function setupVisibilityHandling(canvas) {
-			let wasVisible = true;
-			document.addEventListener('visibilitychange', function() {
-				if (document.hidden) {
-					wasVisible = false;
-					console.log('[WebGL Fix] Tab hidden - pausing game');
-					// Try to pause the game
-					if (engine && engine.rtenv && engine.rtenv.request_quit) {
-						// Don't quit, just let it pause naturally
-					}
-				} else {
-					if (!wasVisible) {
-						console.log('[WebGL Fix] Tab visible again - resuming');
-						wasVisible = true;
-						// Check context health
-						setTimeout(function() {
-							const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
-							if (gl) {
-								if (gl.isContextLost && gl.isContextLost()) {
-									console.error('[WebGL Fix] Context lost after visibility change');
-									// Trigger recovery
-									canvas.dispatchEvent(new Event('webglcontextlost'));
-								} else {
-									patchWebGLContext(gl);
-									patchShaderMethods(gl);
-								}
-							}
-						}, 100);
-					}
-				}
-			});
-		}
-
-		// Handle WebGL context loss on iOS Safari - AGGRESSIVE recovery with Godot reinitialization
+		// Handle WebGL context loss on iOS Safari
 		function setupContextLossHandling(canvas) {
-			let contextLost = false;
-			let restorationAttempts = 0;
-			const MAX_RESTORATION_ATTEMPTS = 5;
-			let isRestoring = false;
-
-			function attemptEngineReinit() {
-				if (engine && engine.rtenv && engine.rtenv.request_quit) {
-					try {
-						engine.rtenv.request_quit();
-						console.log('[WebGL Fix] Requested engine quit for reinit');
-					} catch (e) {
-						console.error('[WebGL Fix] Failed to request engine quit:', e);
-					}
-				}
-				
-				// Try to restart the engine
-				setTimeout(function() {
-					if (engine && engine.startGame) {
-						engine.startGame({
-							'canvas': canvas,
-							'onProgress': function (current, total) {
-								if (total > 0) {
-									statusProgressInner.style.width = current/total * 100 + '%';
-									setStatusMode('progress');
-									if (current === total) {
-										setTimeout(function() {
-											setStatusMode('indeterminate');
-										}, 500);
-									}
-								} else {
-									setStatusMode('indeterminate');
-								}
-							},
-						}).then(function() {
-							console.log('[WebGL Fix] Engine reinitialized after context loss');
-							setStatusMode('hidden');
-							initializing = false;
-							isRestoring = false;
-							restorationAttempts = 0;
-						}, function(err) {
-							console.error('[WebGL Fix] Engine reinit failed:', err);
-							if (restorationAttempts < MAX_RESTORATION_ATTEMPTS) {
-								setTimeout(attemptEngineReinit, 2000);
-							}
-						});
-					}
-				}, 500);
-			}
-
 			canvas.addEventListener('webglcontextlost', function(event) {
 				event.preventDefault();
-				if (contextLost) return; // Already handling
-				contextLost = true;
-				console.error('[WebGL Fix] CONTEXT LOST! Attempt:', restorationAttempts + 1);
-				isRestoring = true;
-				
-				// Try to create a new context immediately
-				setTimeout(function attemptRestore() {
-					if (restorationAttempts >= MAX_RESTORATION_ATTEMPTS) {
-						console.error('[WebGL Fix] Max restoration attempts reached');
-						isRestoring = false;
-						return;
-					}
-					restorationAttempts++;
-					
-					const gl = canvas.getContext('webgl', {
-						alpha: true,
-						antialias: true,
-						depth: true,
-						stencil: false,
-						premultipliedAlpha: true,
-						preserveDrawingBuffer: true,
-						powerPreference: 'default',
-						failIfMajorPerformanceCaveat: false,
-					});
-					
-					if (gl) {
-						patchWebGLContext(gl);
-						patchShaderMethods(gl);
-						contextLost = false;
-						console.log('[WebGL Fix] Context restored successfully on attempt', restorationAttempts);
-						// Reinitialize Godot engine
-						attemptEngineReinit();
-					} else if (restorationAttempts < MAX_RESTORATION_ATTEMPTS) {
-						setTimeout(attemptRestore, 2000);
-					}
-				}, 100);
 			}, false);
 
 			canvas.addEventListener('webglcontextrestored', function(event) {
-				console.log('[WebGL Fix] Native context restored event');
 				setTimeout(function() {
 					const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
 					if (gl) {
 						patchWebGLContext(gl);
 						patchShaderMethods(gl);
-						contextLost = false;
-						console.log('[WebGL Fix] Native context restored and patched');
 					}
 				}, 0);
 			}, false);
@@ -551,15 +217,13 @@
 			gl._patchedShaderMethods = true;
 
 			const shaderMethods = ['shaderSource', 'compileShader', 'getShaderParameter', 'getShaderInfoLog', 'deleteShader', 'getShaderSource'];
-			shaderMethods.forEach(method => {
+			shaderMethods.forEach(function(method) {
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
 					gl[method] = function(shader, ...args) {
-						// Check context lost FIRST
 						if (gl.isContextLost && gl.isContextLost()) {
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
-						// Accept dummy shaders
 						if (!shader || !(shader instanceof WebGLShader || (shader && shader.__webglFixDummy))) {
 							return method === 'getShaderInfoLog' ? '' : undefined;
 						}
@@ -575,9 +239,8 @@
 				}
 			});
 
-			// Also patch program methods
-			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform', 'bindAttribLocation', 'getProgramInfoLog'];
-			programMethods.forEach(method => {
+			const programMethods = ['attachShader', 'detachShader', 'linkProgram', 'getProgramParameter', 'getProgramInfoLog', 'deleteProgram', 'useProgram', 'validateProgram', 'getAttribLocation', 'getUniformLocation', 'getActiveAttrib', 'getActiveUniform', 'bindAttribLocation'];
+			programMethods.forEach(function(method) {
 				if (typeof gl[method] === 'function') {
 					const original = gl[method].bind(gl);
 					gl[method] = function(program, ...args) {
@@ -601,59 +264,28 @@
 					};
 				}
 			});
-
-			// Create a fully functional dummy shader
-			function createDummyShader() {
-				const dummy = { __webglFixDummy: true, _type: 'WebGLShader' };
-				return new Proxy(dummy, {
-					get(target, prop) {
-						if (prop in target) return target[prop];
-						return function() {};
-					},
-					set(target, prop, value) { target[prop] = value; return true; }
-				});
-			}
-
-			// Patch createShader to NEVER return null
-			const originalCreateShader = gl.createShader.bind(gl);
-			gl.createShader = function(type) {
-				const shader = originalCreateShader(type);
-				if (!shader) {
-					return createDummyShader();
-				}
-				return shader;
-			};
-
-			// Create a fully functional dummy program that accepts any property/method
-			function createDummyProgram() {
-				const dummy = { __webglFixDummy: true, _type: 'WebGLProgram' };
-				return new Proxy(dummy, {
-					get(target, prop) {
-						if (prop in target) return target[prop];
-						return function() {};
-					},
-					set(target, prop, value) { target[prop] = value; return true; }
-				});
-			}
-
-			// Patch createProgram to NEVER return null - return a functional dummy if context lost
-			const originalCreateProgram = gl.createProgram.bind(gl);
-			gl.createProgram = function() {
-				const program = originalCreateProgram();
-				if (!program) {
-					return createDummyProgram();
-				}
-				return program;
-			};
 		}
 
-		// Global error handlers
-		window.addEventListener('error', function(event) {
-			console.error(event.error || event.message);
-		});
-		window.addEventListener('unhandledrejection', function(event) {
-			console.error(event.reason);
-		});
+		// Handle visibility change to pause/resume
+		function setupVisibilityHandling(canvas) {
+			document.addEventListener('visibilitychange', function() {
+				if (document.hidden) {
+					console.log('[WebGL Fix] Tab hidden');
+				} else {
+					console.log('[WebGL Fix] Tab visible');
+					setTimeout(function() {
+						const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
+						if (gl && gl.isContextLost && gl.isContextLost()) {
+							console.error('[WebGL Fix] Context lost after visibility change');
+							canvas.dispatchEvent(new Event('webglcontextlost'));
+						} else if (gl) {
+							patchWebGLContext(gl);
+							patchShaderMethods(gl);
+						}
+					}, 100);
+				}
+			});
+		}
 
 		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51086080,"index.wasm":19721321},"focusCanvas":true,"gdnativeLibs":[]};
 		var engine = new Engine(GODOT_CONFIG);
@@ -670,16 +302,14 @@
 
 			var animationCallbacks = [];
 			function animate(time) {
-				animationCallbacks.forEach(callback => callback(time));
+				animationCallbacks.forEach(function(callback) { callback(time); });
 				requestAnimationFrame(animate);
 			}
 			requestAnimationFrame(animate);
 
 			function setStatusMode(mode) {
-
-				if (statusMode === mode || !initializing)
-					return;
-				[statusProgress, statusIndeterminate, statusNotice].forEach(elem => {
+				if (statusMode === mode || !initializing) return;
+				[statusProgress, statusIndeterminate, statusNotice].forEach(function(elem) {
 					elem.style.display = 'none';
 				});
 				animationCallbacks = animationCallbacks.filter(function(value) {
@@ -707,7 +337,7 @@
 			function animateStatusIndeterminate(ms) {
 				var i = Math.floor(ms / INDETERMINATE_STATUS_STEP_MS % 8);
 				if (statusIndeterminate.children[i].style.borderTopColor == '') {
-					Array.prototype.slice.call(statusIndeterminate.children).forEach(child => {
+					Array.prototype.slice.call(statusIndeterminate.children).forEach(function(child) {
 						child.style.borderTopColor = '';
 					});
 					statusIndeterminate.children[i].style.borderTopColor = '#dfdfdf';
@@ -719,7 +349,7 @@
 					statusNotice.removeChild(statusNotice.lastChild);
 				}
 				var lines = text.split('\n');
-				lines.forEach((line) => {
+				lines.forEach(function(line) {
 					statusNotice.appendChild(document.createTextNode(line));
 					statusNotice.appendChild(document.createElement('br'));
 				});
