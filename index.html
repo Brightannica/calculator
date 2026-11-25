@@ -365,14 +365,14 @@
 						contextType = 'webgl';
 					}
 				}
-				// Use stable attributes
+				// Use stable attributes - minimal for iOS
 				const mergedAttrs = Object.assign({}, {
 					alpha: true,
 					antialias: true,
 					depth: true,
 					stencil: false,
 					premultipliedAlpha: true,
-					preserveDrawingBuffer: true,
+					preserveDrawingBuffer: false,  // false for iOS stability
 					powerPreference: 'default',
 					failIfMajorPerformanceCaveat: false,
 				}, attributes || {});
