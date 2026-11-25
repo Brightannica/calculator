@@ -347,8 +347,8 @@
 		// Patch ONLY the game canvas getContext to ensure its contexts have safe getContextAttributes
 		function patchCanvasGetContext(canvas) {
 			const originalGetContext = canvas.getContext.bind(canvas);
-			// iOS Safari compatible WebGL attributes
-			const webglAttributes = {
+			// iOS Safari compatible WebGL attributes - stable for both WebGL 1 and 2
+			const stableAttrs = {
 				alpha: true,
 				antialias: true,
 				depth: true,
@@ -359,7 +359,13 @@
 				failIfMajorPerformanceCaveat: false,
 			};
 			canvas.getContext = function(contextType, attributes) {
-				// Use our stable attributes
+				// Force WebGL 1 ONLY on actual iOS devices
+				if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+					if (contextType === 'webgl2' || contextType === 'experimental-webgl2') {
+						contextType = 'webgl';
+					}
+				}
+				// Use stable attributes
 				const mergedAttrs = Object.assign({}, {
 					alpha: true,
 					antialias: true,
@@ -400,21 +406,68 @@
 			gl._patchedGetContextAttributes = true;
 		}
 
-		// Handle WebGL context loss on iOS Safari - AGGRESSIVE recovery
+		// Handle WebGL context loss on iOS Safari - AGGRESSIVE recovery with Godot reinitialization
 		function setupContextLossHandling(canvas) {
 			let contextLost = false;
 			let restorationAttempts = 0;
 			const MAX_RESTORATION_ATTEMPTS = 5;
+			let isRestoring = false;
+
+			function attemptEngineReinit() {
+				if (engine && engine.rtenv && engine.rtenv.request_quit) {
+					try {
+						engine.rtenv.request_quit();
+						console.log('[WebGL Fix] Requested engine quit for reinit');
+					} catch (e) {
+						console.error('[WebGL Fix] Failed to request engine quit:', e);
+					}
+				}
+				
+				// Try to restart the engine
+				setTimeout(() => {
+					if (engine && engine.startGame) {
+						engine.startGame({
+							'canvas': canvas,
+							'onProgress': function (current, total) {
+								if (total > 0) {
+									statusProgressInner.style.width = current/total * 100 + '%';
+									setStatusMode('progress');
+									if (current === total) {
+										setTimeout(() => {
+											setStatusMode('indeterminate');
+										}, 500);
+									}
+								} else {
+									setStatusMode('indeterminate');
+								}
+							},
+						}).then(() => {
+							console.log('[WebGL Fix] Engine reinitialized after context loss');
+							setStatusMode('hidden');
+							initializing = false;
+							isRestoring = false;
+							restorationAttempts = 0;
+						}, function(err) {
+							console.error('[WebGL Fix] Engine reinit failed:', err);
+							if (restorationAttempts < MAX_RESTORATION_ATTEMPTS) {
+								setTimeout(attemptEngineReinit, 2000);
+							}
+						});
+				}, 500);
+			}
 
 			canvas.addEventListener('webglcontextlost', function(event) {
 				event.preventDefault();
+				if (contextLost) return; // Already handling
 				contextLost = true;
 				console.error('[WebGL Fix] CONTEXT LOST! Attempt:', restorationAttempts + 1);
+				isRestoring = true;
 				
 				// Try to create a new context immediately
 				setTimeout(function attemptRestore() {
 					if (restorationAttempts >= MAX_RESTORATION_ATTEMPTS) {
 						console.error('[WebGL Fix] Max restoration attempts reached');
+						isRestoring = false;
 						return;
 					}
 					restorationAttempts++;
@@ -435,8 +488,10 @@
 						patchShaderMethods(gl);
 						contextLost = false;
 						console.log('[WebGL Fix] Context restored successfully on attempt', restorationAttempts);
+						// Reinitialize Godot engine
+						attemptEngineReinit();
 					} else if (restorationAttempts < MAX_RESTORATION_ATTEMPTS) {
-						setTimeout(attemptRestore, 1000);
+						setTimeout(attemptRestore, 2000);
 					}
 				}, 100);
 			}, false);
@@ -448,6 +503,8 @@
 					if (gl) {
 						patchWebGLContext(gl);
 						patchShaderMethods(gl);
+						contextLost = false;
+						console.log('[WebGL Fix] Native context restored and patched');
 					}
 				}, 0);
 			}, false);
